@@ -1,6 +1,16 @@
 # ── Entorno / Secretos ────────────────────────────────────────────────────────
 .env
 
+# ── Modelos ML (archivos grandes — distribuir por separado) ──────────────────
+yolo11x-pose.pt
+*.pth
+*.onnx
+*.h5
+*.pkl
+*.bin
+checkpoints/
+
+
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
