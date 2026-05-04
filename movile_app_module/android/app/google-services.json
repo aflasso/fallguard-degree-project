@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "279122252609",
+    "project_id": "fallguard-8e840",
+    "storage_bucket": "fallguard-8e840.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:279122252609:android:4a661c22b931c37e1747c0",
+        "android_client_info": {
+          "package_name": "com.fallguard.fallguard"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "279122252609-dg86cjo4napvrj802mfb2i27dc4rilh3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fallguard.fallguard",
+            "certificate_hash": "517d2e92ee8aff966de4cee32f3b98244c6edfd7"
+          }
+        },
+        {
+          "client_id": "279122252609-tjbr8pvsf11nsacqnq4ij6ue2kv2mej1.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4vDCk15pjyHvSTs2AQ_cLwp0QbbO4p4I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "279122252609-tjbr8pvsf11nsacqnq4ij6ue2kv2mej1.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "279122252609-0mdeq8r06err9vmm970qbck06n46fl35.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.fallguard.fallguard"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

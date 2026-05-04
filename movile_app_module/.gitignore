@@ -1,0 +1,51 @@
+# ── Flutter / Dart ────────────────────────────────────────────────────────────
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+# pubspec.lock NO se ignora en apps — garantiza builds reproducibles entre
+# colaboradores. Solo se ignora en paquetes/librerías publicados en pub.dev.
+
+# ── Android ───────────────────────────────────────────────────────────────────
+android/.gradle/
+android/local.properties
+# key.properties y keystores contienen credenciales de firma — nunca al repo
+android/key.properties
+*.keystore
+*.jks
+
+# ── iOS ───────────────────────────────────────────────────────────────────────
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+# GoogleService-Info.plist se ignora SOLO si no existe todavía.
+# Cuando se configure iOS, decidir si se commitea o se distribuye por otro canal.
+GoogleService-Info.plist
+
+# ── Plataformas no objetivo ───────────────────────────────────────────────────
+windows/
+linux/
+macos/
+
+# ── Secretos / Entorno ────────────────────────────────────────────────────────
+.env
+.env.*
+# NOTA: google-services.json y firebase_options.dart SÍ se commitean.
+# Sus claves son de cliente (no secretos de servidor) y están protegidas
+# por Firebase Security Rules y restricciones de dominio/SHA-1.
+
+# ── Editores / IDEs ───────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+.metadata
+
+# ── Sistema operativo ─────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log

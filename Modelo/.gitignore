@@ -1,0 +1,43 @@
+# ── Modelos ML (archivos grandes — distribuir por separado) ──────────────────
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pkl
+*.bin
+checkpoints/
+
+# ── Datasets de video (archivos grandes) ─────────────────────────────────────
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.csv
+*.jpg
+*.txt
+
+# ── Resultados de entrenamiento YOLO ─────────────────────────────────────────
+runs/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# ── Editores / IDEs ───────────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ── Sistema operativo ─────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
