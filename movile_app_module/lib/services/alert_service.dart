@@ -87,6 +87,14 @@ class AlertService {
     return _userRef.snapshots().map((doc) => doc.data());
   }
 
+  static Stream<List<Map<String, dynamic>>> linkedModulesStream() {
+    return _db
+        .collection('modules')
+        .where('user_id', isEqualTo: _uid)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => d.data()).toList());
+  }
+
   // ── Alertas ────────────────────────────────────────────────────────────────
 
   static Future<List<AlertModel>> _fetchAlerts() async {

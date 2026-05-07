@@ -3,9 +3,19 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fallguard_app_bar.dart';
 import '../services/auth_service.dart';
+import 'edit_profile_screen.dart';
+import 'security_screen.dart';
+import 'emergency_alerts_screen.dart';
+import 'assisted_persons_screen.dart';
+import 'linked_cameras_screen.dart';
+import 'help_center_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
+
+  void _open(BuildContext context, Widget screen) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -18,45 +28,48 @@ class SettingsScreen extends StatelessWidget {
             const SizedBox(height: 24),
 
             // ── Profile section ────────────────────────────────────────
-            Stack(
-              alignment: Alignment.center,
-              children: [
-                Container(
-                  width: 90,
-                  height: 90,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryContainer,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: AppTheme.primary.withValues(alpha: 0.2),
-                      width: 3,
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.person,
-                    size: 48,
-                    color: AppTheme.primary,
-                  ),
-                ),
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: Container(
-                    width: 28,
-                    height: 28,
+            GestureDetector(
+              onTap: () => _open(context, const EditProfileScreen()),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    width: 90,
+                    height: 90,
                     decoration: BoxDecoration(
-                      color: AppTheme.primary,
+                      color: AppTheme.primaryContainer,
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
+                      border: Border.all(
+                        color: AppTheme.primary.withValues(alpha: 0.2),
+                        width: 3,
+                      ),
                     ),
                     child: const Icon(
-                      Icons.edit,
-                      color: Colors.white,
-                      size: 14,
+                      Icons.person,
+                      size: 48,
+                      color: AppTheme.primary,
                     ),
                   ),
-                ),
-              ],
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                      child: const Icon(
+                        Icons.edit,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             Text(
@@ -83,7 +96,7 @@ class SettingsScreen extends StatelessWidget {
                   minimumSize: const Size(160, 44),
                   padding: EdgeInsets.zero,
                 ),
-                onPressed: () {},
+                onPressed: () => _open(context, const EditProfileScreen()),
                 child: Text(
                   'Editar Perfil',
                   style: GoogleFonts.manrope(
@@ -98,22 +111,42 @@ class SettingsScreen extends StatelessWidget {
 
             // ── Sections ───────────────────────────────────────────────
             _section('SEGURIDAD DE LA CUENTA', [
-              const _Item(Icons.lock_outline, 'Seguridad y Contraseña',
-                  'Actualiza credenciales y 2FA'),
-              const _Item(Icons.notifications_outlined, 'Alertas de Emergencia',
-                  'Gestiona sirena y contactos SMS'),
+              _Item(
+                Icons.lock_outline,
+                'Seguridad y Contraseña',
+                'Actualiza credenciales y 2FA',
+                () => _open(context, const SecurityScreen()),
+              ),
+              _Item(
+                Icons.notifications_outlined,
+                'Alertas de Emergencia',
+                'Gestiona sirena y contactos SMS',
+                () => _open(context, const EmergencyAlertsScreen()),
+              ),
             ]),
             const SizedBox(height: 20),
             _section('MONITOREO', [
-              const _Item(Icons.people_outline, 'Personas Asistidas',
-                  'Gestionar perfil de George & Mary'),
-              const _Item(Icons.videocam_outlined, 'Cámaras Vinculadas',
-                  '3 sensores de piso activos detectados'),
+              _Item(
+                Icons.people_outline,
+                'Personas Asistidas',
+                'Gestiona los perfiles monitoreados',
+                () => _open(context, const AssistedPersonsScreen()),
+              ),
+              _Item(
+                Icons.videocam_outlined,
+                'Cámaras Vinculadas',
+                'Administra los módulos conectados',
+                () => _open(context, const LinkedCamerasScreen()),
+              ),
             ]),
             const SizedBox(height: 20),
             _section('SOPORTE', [
-              const _Item(Icons.help_outline, 'Centro de Ayuda',
-                  'Guías y soporte técnico'),
+              _Item(
+                Icons.help_outline,
+                'Centro de Ayuda',
+                'Guías y soporte técnico',
+                () => _open(context, const HelpCenterScreen()),
+              ),
             ]),
             const SizedBox(height: 24),
 
@@ -217,7 +250,7 @@ class SettingsScreen extends StatelessWidget {
 
   Widget _row(_Item item) {
     return InkWell(
-      onTap: () {},
+      onTap: item.onTap,
       borderRadius: BorderRadius.circular(14),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -269,6 +302,7 @@ class _Item {
   final IconData icon;
   final String title;
   final String subtitle;
+  final VoidCallback onTap;
 
-  const _Item(this.icon, this.title, this.subtitle);
+  const _Item(this.icon, this.title, this.subtitle, this.onTap);
 }
