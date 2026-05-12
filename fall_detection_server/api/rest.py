@@ -6,8 +6,9 @@ Maneja las peticiones HTTP de la app móvil.
 import logging
 from typing import List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from api.auth import verify_token, require_same_user
 from api.schemas import (
     LinkModuleSchema,
     ModuleStatusSchema,
@@ -19,7 +20,6 @@ from api.schemas import (
 from api.schemas.alert_schemas import RequestUploadUrlSchema, UpdateAlertStatusSchema
 from application.dtos.alert_dtos import GenerateUploadUrlCommand
 from application.dtos.module_dtos import LinkModuleCommand
-from application.dtos.user_dtos import CreateUserCommand, UpdateFCMTokenCommand
 from application.use_cases.generate_upload_url import GenerateUploadUrl
 from application.use_cases.link_module import LinkModule
 from domain.entities import AlertStatus
@@ -30,7 +30,7 @@ from infrastructure.websocket.connection_manager import WebSocketConnectionManag
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(verify_token)])
 
 
 class RestHandler:
@@ -47,11 +47,11 @@ class RestHandler:
         connection_manager:   WebSocketConnectionManager,
         generate_upload_url:  GenerateUploadUrl,
     ):
-        self._module_repo      = module_repository
-        self._alert_repo       = alert_repository
-        self._user_repo        = user_repository
-        self._link_module      = link_module
-        self._connection_mgr   = connection_manager
+        self._module_repo         = module_repository
+        self._alert_repo          = alert_repository
+        self._user_repo           = user_repository
+        self._link_module         = link_module
+        self._connection_mgr      = connection_manager
         self._generate_upload_url = generate_upload_url
 
         # Registrar rutas
@@ -63,8 +63,13 @@ class RestHandler:
         router.post("/clips/upload-url")(self.request_upload_url)
         router.patch("/alerts/{alert_id}/seen")(self.update_alert_status)
 
-    async def link_module(self, body: LinkModuleSchema) -> dict:
+    async def link_module(
+        self,
+        body:  LinkModuleSchema,
+        token: dict = Depends(verify_token),
+    ) -> dict:
         """Vincula un módulo a un usuario."""
+        require_same_user(token["uid"], body.user_id)
         try:
             command = LinkModuleCommand(
                 module_id= body.module_id,
@@ -75,11 +80,18 @@ class RestHandler:
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
-    async def module_status(self, module_id: str) -> ModuleStatusSchema:
+    async def module_status(
+        self,
+        module_id: str,
+        token:     dict = Depends(verify_token),
+    ) -> ModuleStatusSchema:
         """Retorna el estado actual de un módulo."""
         module = await self._module_repo.find_by_id(module_id)
         if module is None:
             raise HTTPException(status_code=404, detail="Módulo no encontrado")
+        if module.user_id is None:
+            raise HTTPException(status_code=403, detail="Módulo no vinculado a ningún usuario")
+        require_same_user(token["uid"], module.user_id)
 
         return ModuleStatusSchema(
             module_id= module.module_id,
@@ -89,8 +101,19 @@ class RestHandler:
             user_id=   module.user_id,
         )
 
-    async def request_upload_url(self, body: RequestUploadUrlSchema) -> dict:
+    async def request_upload_url(
+        self,
+        body:  RequestUploadUrlSchema,
+        token: dict = Depends(verify_token),
+    ) -> dict:
         """Genera una presigned URL para subir un clip."""
+        module = await self._module_repo.find_by_id(body.module_id)
+        if module is None:
+            raise HTTPException(status_code=404, detail="Módulo no encontrado")
+        if module.user_id is None:
+            raise HTTPException(status_code=403, detail="Módulo no vinculado a ningún usuario")
+        require_same_user(token["uid"], module.user_id)
+
         command = GenerateUploadUrlCommand(
             module_id= body.module_id,
             clip_id=   body.clip_id,
@@ -100,10 +123,15 @@ class RestHandler:
             "presigned_url": result.presigned_url,
             "public_url":    result.public_url,
             "expires_in":    result.expires_in,
-    }
+        }
 
-    async def get_alerts(self, user_id: str) -> List[AlertResponseSchema]:
+    async def get_alerts(
+        self,
+        user_id: str,
+        token:   dict = Depends(verify_token),
+    ) -> List[AlertResponseSchema]:
         """Retorna el historial de alertas de un usuario."""
+        require_same_user(token["uid"], user_id)
         alerts = await self._alert_repo.find_by_user(user_id)
         return [
             AlertResponseSchema(
@@ -117,8 +145,13 @@ class RestHandler:
             for a in alerts
         ]
 
-    async def create_user(self, body: CreateUserSchema) -> dict:
+    async def create_user(
+        self,
+        body:  CreateUserSchema,
+        token: dict = Depends(verify_token),
+    ) -> dict:
         """Crea un nuevo usuario."""
+        require_same_user(token["uid"], body.user_id)
         from domain.entities import User
         user = User(
             user_id=   body.user_id,
@@ -128,11 +161,19 @@ class RestHandler:
         await self._user_repo.save(user)
         return {"message": "Usuario creado correctamente"}
 
-    async def update_alert_status(self, alert_id: str, body: UpdateAlertStatusSchema) -> dict:
+    async def update_alert_status(
+        self,
+        alert_id: str,
+        body:     UpdateAlertStatusSchema,
+        token:    dict = Depends(verify_token),
+    ) -> dict:
         """Actualiza el estado de una alerta (seen, confirmed, falseAlarm)."""
         alert = await self._alert_repo.find_by_id(alert_id)
         if alert is None:
             raise HTTPException(status_code=404, detail="Alerta no encontrada")
+        if alert.user_id is None:
+            raise HTTPException(status_code=403, detail="Alerta sin usuario asociado")
+        require_same_user(token["uid"], alert.user_id)
         try:
             alert.status = AlertStatus(body.status)
         except ValueError:
@@ -141,12 +182,17 @@ class RestHandler:
         await self._alert_repo.save(alert)
         return {"message": "Estado actualizado"}
 
-    async def update_fcm_token(self, user_id: str, body: UpdateFCMTokenSchema) -> dict:
+    async def update_fcm_token(
+        self,
+        user_id: str,
+        body:    UpdateFCMTokenSchema,
+        token:   dict = Depends(verify_token),
+    ) -> dict:
         """Actualiza el token FCM de un usuario."""
+        require_same_user(token["uid"], user_id)
         user = await self._user_repo.find_by_id(user_id)
         if user is None:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
-
         user.fcm_token = body.fcm_token
         await self._user_repo.save(user)
         return {"message": "FCM token actualizado"}
