@@ -43,7 +43,8 @@ Este servidor **nunca toca el video**: solo genera la URL de subida y almacena l
 | Base de datos | Firestore (firebase-admin, async) |
 | Push notifications | Firebase Cloud Messaging (FCM) |
 | Almacenamiento de clips | Google Cloud Storage (presigned URL v4) |
-| Autenticación | Firebase Auth (Bearer token verificado por endpoint) |
+| Autenticación REST | Firebase Auth (Bearer token verificado por endpoint) |
+| Autenticación WebSocket | API key via query param `?api_key=` |
 | Runtime | Python 3.11+ / uvicorn |
 
 ---
@@ -88,16 +89,16 @@ Toda la cableada ocurre en `main.py` → `startup()`. No hay service locator ni 
 | `ConnectModule` | WebSocket `module_connect` | Registra el módulo en Firestore si es nuevo, actualiza status a CONNECTED |
 | `DisconnectModule` | WebSocket disconnect | Marca el módulo como DISCONNECTED en Firestore |
 | `HandleFallAlert` | WebSocket `fall_alert` | Guarda la Alert en Firestore y envía push FCM al usuario vinculado |
-| `GenerateUploadUrl` | WebSocket `request_upload_url` o REST | Genera presigned URL GCS para PUT del clip |
-| `LinkModule` | REST `POST /api/modules/link` | Asocia un `module_id` a un `user_id` en Firestore |
+| `GenerateUploadUrl` | WebSocket `request_upload_url` | Genera presigned URL GCS para PUT del clip. Requiere módulo vinculado a usuario. |
+| `LinkModule` | REST `POST /api/modules/link` | Asocia un `module_id` a un `user_id`. Rechaza si el módulo ya está vinculado a otro usuario. |
 
 ---
 
 ## API WebSocket
 
-**Endpoint:** `ws://<host>/ws`
+**Endpoint:** `ws://<host>/ws?api_key=<MODULE_API_KEY>`
 
-El primer mensaje que envía el módulo **debe** ser `module_connect`. Si no, el servidor cierra con código `4000`.
+La conexión requiere el query param `api_key`. Si falta o es incorrecto, el servidor cierra con código `4001`. El primer mensaje tras conectar **debe** ser `module_connect`; si no, cierra con código `4000`.
 
 ### Mensajes módulo → servidor
 
@@ -126,30 +127,35 @@ El primer mensaje que envía el módulo **debe** ser `module_connect`. Si no, el
 // Confirmación de conexión
 { "type": "connected", "module_id": "uuid" }
 
-// Respuesta a request_upload_url
+// Respuesta a request_upload_url (éxito)
 { "type": "upload_url", "clip_id": "uuid-clip",
   "presigned_url": "https://storage.googleapis.com/...",
   "public_url": "https://storage.googleapis.com/...",
   "expires_in": 300 }
+
+// Respuesta a request_upload_url (error — módulo no vinculado, etc.)
+{ "type": "upload_url_error", "clip_id": "uuid-clip", "error": "descripción" }
 ```
 
 ---
 
 ## API REST
 
-**Base path:** `/api`  
-**Autenticación:** todos los endpoints requieren `Authorization: Bearer <firebase-id-token>`.  
-El token se verifica con Firebase Auth. El `uid` del token debe coincidir con el `user_id` del recurso (verificado por `require_same_user`), excepto en endpoints de solo lectura de módulos.
+**Base path:** `/api`
+**Autenticación:** todos los endpoints requieren `Authorization: Bearer <firebase-id-token>`.
+El token se verifica con Firebase Auth. El `uid` del token debe coincidir con el `user_id` del recurso (verificado por `require_same_user`).
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `POST` | `/api/users` | Crea un usuario nuevo (llamado en el primer login de la app) |
+| `POST` | `/api/users` | Crea un usuario nuevo. Retorna `409` si ya existe. |
 | `PATCH` | `/api/users/{user_id}/fcm-token` | Actualiza el FCM token del usuario |
-| `POST` | `/api/modules/link` | Vincula módulo a usuario (body: `{module_id, user_id}`) |
+| `POST` | `/api/modules/link` | Vincula módulo a usuario. Retorna `403` si ya está vinculado a otro usuario. |
 | `GET` | `/api/modules/status/{module_id}` | Estado del módulo: `status`, `last_seen`, `cameras` |
 | `GET` | `/api/alerts?user_id={uid}` | Historial de alertas del usuario (desc por timestamp) |
 | `PATCH` | `/api/alerts/{alert_id}/seen` | Marca alerta como vista y actualiza su status |
-| `POST` | `/api/clips/upload-url` | Genera presigned URL para subir un clip (body: `{module_id, clip_id}`) |
+| `POST` | `/api/clips/upload-url` | Genera presigned URL para subir un clip — **solo para la app móvil**, no para el módulo local |
+
+> El módulo local solicita presigned URLs via WebSocket (`request_upload_url`), no via REST.
 
 ---
 
@@ -176,7 +182,56 @@ Los repositorios implementan una clase base genérica `FirestoreRepository[T]` e
 
 ### GCS (Google Cloud Storage)
 
-`infrastructure/gcs/presigned_url.py` genera presigned URLs v4 para PUT con expiración de 5 minutos. El módulo local hace el PUT directamente a GCS — el servidor solo recibe la `public_url` resultante en el mensaje `fall_alert`.
+`infrastructure/gcs/presigned_url.py` genera presigned URLs v4 para PUT con expiración de 5 minutos.
+
+Path del objeto en el bucket: `clips/{user_id}/{module_id}/{clip_id}.mp4`
+
+El módulo local hace el PUT directamente a GCS — el servidor solo recibe la `public_url` resultante en el mensaje `fall_alert`.
+
+### Reglas de Firebase Storage recomendadas
+
+```js
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /clips/{userId}/{moduleId}/{clipId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;  // solo via presigned URL
+    }
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+```
+
+### Reglas de Firestore recomendadas
+
+```js
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    match /modules/{moduleId} {
+      allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
+      allow write: if false;
+    }
+    match /alerts/{alertId} {
+      allow read: if request.auth != null && resource.data.user_id == request.auth.uid;
+      allow update: if request.auth != null
+                    && resource.data.user_id == request.auth.uid
+                    && request.resource.data.diff(resource.data)
+                         .affectedKeys().hasOnly(['seen', 'status']);
+      allow create, delete: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+```
 
 ### WebSocket Connection Manager
 
@@ -196,6 +251,9 @@ Variables de entorno (ver `.env.template`):
 | `PORT` | `8000` | Puerto del servidor |
 | `LOG_LEVEL` | `INFO` | Nivel de logging |
 | `HEARTBEAT_TIMEOUT` | `90` | Segundos sin heartbeat para considerar módulo desconectado |
+| `MODULE_API_KEY` | `""` | API key que deben presentar los módulos al conectarse via WebSocket |
+
+Generar `MODULE_API_KEY`: `python -c "import secrets; print(secrets.token_hex(32))"`
 
 El archivo `credentials/serviceAccountKey.json` se obtiene desde Firebase Console → Project Settings → Service accounts → Generate new private key. Está en `.gitignore`.
 
@@ -220,7 +278,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ```
 fall_detection_server/
-├── main.py                          ← startup, wiring de dependencias, endpoints raíz
+├── main.py                          ← startup, wiring de dependencias, endpoint WebSocket
 ├── config.py                        ← variables de entorno con defaults
 ├── pyproject.toml                   ← dependencias y configuración del paquete
 ├── .env / .env.template
@@ -242,8 +300,8 @@ fall_detection_server/
 │   │   └── user_dtos.py             ← CreateUserCommand, UpdateFCMTokenCommand
 │   ├── ports/
 │   │   ├── connection_manager.py    ← ABC ConnectionManager (send, is_connected)
-│   │   ├── notification_sender.py   ← ABC NotificationSender (send_fall_alert, send_module_disconnected)
-│   │   └── upload_url_generator.py  ← ABC UploadUrlGenerator + UploadUrlResult
+│   │   ├── notification_sender.py   ← ABC NotificationSender
+│   │   └── upload_url_generator.py  ← ABC UploadUrlGenerator(clip_id, user_id, module_id)
 │   └── use_cases/
 │       ├── connect_module.py
 │       ├── disconnect_module.py
@@ -266,15 +324,15 @@ fall_detection_server/
 │
 ├── api/
 │   ├── auth.py                      ← verify_token (Firebase Auth), require_same_user
-│   ├── rest.py                      ← RestHandler + router APIRouter
+│   ├── rest.py                      ← RestHandler + APIRouter (sin dependencies globales)
 │   ├── websocket.py                 ← WebSocketHandler
 │   └── schemas/
-│       ├── module_schemas.py        ← ModuleConnectSchema, HeartbeatSchema, ModuleStatusSchema, ...
-│       ├── alert_schemas.py         ← FallAlertSchema, RequestUploadUrlSchema, AlertResponseSchema, ...
-│       ├── user_schemas.py          ← CreateUserSchema, UpdateFCMTokenSchema
-│       └── __init__.py              ← re-exporta todos los schemas
+│       ├── module_schemas.py
+│       ├── alert_schemas.py
+│       ├── user_schemas.py
+│       └── __init__.py
 │
-└── tests/                           ← carpeta existente, tests pendientes de implementar
+└── tests/
 ```
 
 ---
@@ -282,16 +340,22 @@ fall_detection_server/
 ## Decisiones de diseño relevantes
 
 **¿Por qué el servidor no almacena los clips?**
-El módulo sube el clip directamente a GCS usando una presigned URL. El servidor solo almacena la URL pública. Esto evita que el servidor sea un cuello de botella para archivos de video y simplifica la escalabilidad.
+El módulo sube el clip directamente a GCS usando una presigned URL. El servidor solo almacena la URL pública. Esto evita que el servidor sea un cuello de botella para archivos de video.
 
-**¿Por qué el `WebSocketConnectionManager` vive en memoria y no en Firestore?**
-Las conexiones WebSocket son estado efímero — no tiene sentido persistirlas. Firestore almacena el estado durable (si el módulo está CONNECTED o DISCONNECTED), pero la referencia al objeto `WebSocket` activo solo puede vivir en el proceso que la acepta.
+**¿Por qué el módulo usa WebSocket para pedir la presigned URL en lugar del REST API?**
+El endpoint REST `/api/clips/upload-url` requiere Firebase Auth Bearer token — credencial que el módulo local (PC) no posee. El WebSocket ya está autenticado via `MODULE_API_KEY`, así que la presigned URL se solicita por ahí.
 
-**¿Por qué `module_connect` es el primer mensaje obligatorio y no parte del handshake HTTP?**
-Permite que el módulo se identifique con su UUID propio (no derivado de la autenticación HTTP) y envíe la lista de cámaras disponibles en el mismo mensaje. Simplifica el protocolo al tenerlo todo en un solo flujo WebSocket.
+**¿Por qué API key para WebSocket y no Firebase Auth?**
+El módulo local es un proceso de PC, no un usuario de Firebase. No puede obtener un Firebase ID token. Un API key compartido es el mecanismo más simple y efectivo para autenticar un cliente de servidor a servidor.
+
+**¿Por qué `LinkModule` rechaza si el módulo ya tiene dueño?**
+Evita que un usuario robe el módulo de otro escaneando su QR. Un módulo solo puede reasignarse si primero se desvincula explícitamente.
+
+**¿Por qué `POST /api/users` retorna 409 en lugar de upsert silencioso?**
+Hace explícito el contrato: este endpoint es para creación, no actualización. El update de datos de usuario va por `PATCH /api/users/{user_id}/fcm-token`.
 
 **¿Por qué los repositorios de dominio son ABCs y no directamente Firestore?**
-Permite testear casos de uso con repositorios en memoria sin tocar Firebase. La capa de aplicación no sabe qué base de datos usa.
+Permite testear casos de uso con repositorios en memoria sin tocar Firebase.
 
 **¿Por qué `require_same_user` en cada endpoint REST?**
-Un usuario autenticado en Firebase solo puede leer y modificar sus propios recursos. El `uid` del token JWT de Firebase se compara con el `user_id` del recurso antes de ejecutar cualquier operación.
+Un usuario autenticado en Firebase solo puede leer y modificar sus propios recursos.
