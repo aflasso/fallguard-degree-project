@@ -30,7 +30,7 @@ from infrastructure.websocket.connection_manager import WebSocketConnectionManag
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", dependencies=[Depends(verify_token)])
+router = APIRouter(prefix="/api")
 
 
 class RestHandler:
@@ -77,6 +77,8 @@ class RestHandler:
             )
             await self._link_module.execute(command)
             return {"message": "Módulo vinculado correctamente"}
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=str(e))
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
@@ -152,6 +154,9 @@ class RestHandler:
     ) -> dict:
         """Crea un nuevo usuario."""
         require_same_user(token["uid"], body.user_id)
+        existing = await self._user_repo.find_by_id(body.user_id)
+        if existing is not None:
+            raise HTTPException(status_code=409, detail="Usuario ya existe")
         from domain.entities import User
         user = User(
             user_id=   body.user_id,

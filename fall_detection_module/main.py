@@ -165,10 +165,7 @@ def main():
     local_queue = LocalAlertQueue(
         queue_path=config.LOCAL_QUEUE_PATH,
     )
-    s3_uploader = S3ClipUploader(
-        server_url=config.SERVER_HTTP_URL,
-        module_id= config.MODULE_ID,
-    )
+    s3_uploader = S3ClipUploader()
 
     # ── Dominio ───────────────────────────────────────────────────────────
     fall_service = FallDetectionService(
@@ -205,8 +202,12 @@ def main():
         # Por ahora solo log — requiere reinicio para aplicar
 
     # ── WebSocket ─────────────────────────────────────────────────────────
+    ws_url = config.SERVER_WS_URL
+    if config.MODULE_API_KEY:
+        ws_url = f"{config.SERVER_WS_URL}?api_key={config.MODULE_API_KEY}"
+
     ws_client = WebSocketClient(
-        server_url=       config.SERVER_WS_URL,
+        server_url=       ws_url,
         module_id=        config.MODULE_ID,
         cameras=          cameras_dict,
         on_set_camera=    on_set_camera,

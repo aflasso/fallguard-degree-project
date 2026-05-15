@@ -2,15 +2,14 @@
 Infraestructura — implementación de ClipStorage.
 Implementa el puerto application/ports/clip_storage.py
 
-Sube clips al bucket S3 usando presigned URLs.
+Sube clips al bucket usando una presigned URL obtenida previamente via WebSocket.
 El flujo es:
-  1. Solicita presigned URL al servidor via HTTP
-  2. Sube el clip directamente al bucket usando esa URL
+  1. Recibe presigned_url y public_url (obtenidas por WebSocketClient)
+  2. Sube el clip directamente al bucket via PUT
   3. Retorna la URL pública del clip
 """
 
 import logging
-import os
 import requests
 from pathlib import Path
 
@@ -27,69 +26,34 @@ class S3ClipUploader(ClipStorage):
     credenciales de S3 nunca llegan al módulo local.
     """
 
-    def __init__(
-        self,
-        server_url:  str,
-        module_id:   str,
-        timeout:     int = 30,
-    ):
-        self._server_url = server_url.rstrip("/")
-        self._module_id  = module_id
-        self._timeout    = timeout
+    def __init__(self, timeout: int = 30):
+        self._timeout = timeout
 
     # ── Puerto ────────────────────────────────────────────────────────────
 
-    def upload(self, clip_path: str, clip_id: str) -> str:
+    def upload(self, clip_path: str, presigned_url: str, public_url: str) -> str:
         """
-        1. Solicita presigned URL al servidor
-        2. Sube el clip directamente al bucket
-        3. Retorna URL pública del clip
+        Sube el clip directamente al bucket usando la presigned URL provista
+        y retorna la URL pública.
 
         Args:
-            clip_path: ruta local del archivo .mp4
-            clip_id:   UUID del clip
-
-        Returns:
-            URL pública del clip en el bucket
+            clip_path:     ruta local del archivo .mp4
+            presigned_url: URL firmada para PUT directo al bucket (obtenida via WebSocket)
+            public_url:    URL pública resultante
 
         Raises:
             FileNotFoundError: si el clip no existe en disco
-            RuntimeError: si falla la solicitud de URL o la subida
+            RuntimeError: si falla la subida
         """
         if not Path(clip_path).exists():
             raise FileNotFoundError(f"Clip no encontrado: {clip_path}")
 
-        # 1. Solicitar presigned URL al servidor
-        presigned_url, public_url = self._request_upload_url(clip_id)
-
-        # 2. Subir clip directamente al bucket
         self._upload_to_bucket(clip_path, presigned_url)
 
         logger.info(f"Clip subido correctamente: {public_url}")
         return public_url
 
     # ── Helpers ───────────────────────────────────────────────────────────
-
-    def _request_upload_url(self, clip_id: str) -> tuple[str, str]:
-        """
-        Solicita al servidor una presigned URL para subir el clip.
-        Retorna (presigned_url, public_url).
-        """
-        url = f"{self._server_url}/api/clips/upload-url"
-        payload = {
-            "module_id": self._module_id,
-            "clip_id":   clip_id,
-        }
-
-        try:
-            response = requests.post(url, json=payload, timeout=self._timeout)
-            response.raise_for_status()
-            data = response.json()
-            return data["presigned_url"], data["public_url"]
-        except requests.exceptions.Timeout:
-            raise RuntimeError(f"Timeout solicitando presigned URL para {clip_id}")
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Error solicitando presigned URL: {e}")
 
     def _upload_to_bucket(self, clip_path: str, presigned_url: str) -> None:
         """

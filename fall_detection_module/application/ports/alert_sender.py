@@ -28,3 +28,16 @@ class AlertSender(ABC):
     def is_connected(self) -> bool:
         """Retorna True si hay conexión activa con el servidor."""
         ...
+
+    @abstractmethod
+    def request_upload_url(self, clip_id: str, timeout: int = 30) -> tuple[str, str]:
+        """
+        Solicita al servidor una presigned URL para subir un clip via WebSocket.
+
+        Returns:
+            (presigned_url, public_url)
+
+        Raises:
+            RuntimeError si no hay conexión o se agota el timeout
+        """
+        ...

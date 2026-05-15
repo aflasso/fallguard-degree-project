@@ -26,12 +26,12 @@ class GCSPresignedUrlGenerator(UploadUrlGenerator):
         self._bucket     = self._client.bucket(config.GCS_BUCKET_NAME)
         self._expires_in = 300   # 5 minutos
 
-    async def generate(self, clip_id: str) -> UploadUrlResult:
+    async def generate(self, clip_id: str, user_id: str, module_id: str) -> UploadUrlResult:
         """
         Genera una presigned URL para subir un clip a GCS.
-        La clave del objeto será: clips/{clip_id}.mp4
+        La clave del objeto será: clips/{user_id}/{module_id}/{clip_id}.mp4
         """
-        blob_name = f"clips/{clip_id}.mp4"
+        blob_name = f"clips/{user_id}/{module_id}/{clip_id}.mp4"
         blob      = self._bucket.blob(blob_name)
 
         try:

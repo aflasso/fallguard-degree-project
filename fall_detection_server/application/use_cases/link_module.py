@@ -33,6 +33,9 @@ class LinkModule:
         if module is None:
             raise ValueError(f"Módulo no encontrado: {command.module_id}")
 
+        if module.user_id is not None and module.user_id != command.user_id:
+            raise PermissionError(f"Módulo ya vinculado a otro usuario")
+
         user = await self._user_repo.find_by_id(command.user_id)
         if user is None:
             raise ValueError(f"Usuario no encontrado: {command.user_id}")

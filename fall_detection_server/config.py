@@ -4,7 +4,6 @@ Lee desde variables de entorno con valores por defecto.
 """
 
 import os
-from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,3 +25,6 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # ── Heartbeat ─────────────────────────────────────────────────────────────────
 HEARTBEAT_TIMEOUT = int(os.getenv("HEARTBEAT_TIMEOUT", "90"))  # segundos
+
+# ── WebSocket ─────────────────────────────────────────────────────────────────
+MODULE_API_KEY = os.getenv("MODULE_API_KEY", "")

@@ -47,11 +47,12 @@ class WebSocketClient(AlertSender):
         self._on_set_camera    = on_set_camera
         self._on_config_update = on_config_update
 
-        self._ws:          Optional[websocket.WebSocketApp] = None
-        self._connected:   bool      = False
-        self._lock         = threading.Lock()
-        self._backoff:     float     = 1.0
-        self._stop_event   = threading.Event()
+        self._ws:              Optional[websocket.WebSocketApp] = None
+        self._connected:       bool      = False
+        self._lock             = threading.Lock()
+        self._backoff:         float     = 1.0
+        self._stop_event       = threading.Event()
+        self._pending_uploads: dict      = {}   # {clip_id: (Event, result_dict)}
 
     # ── Puerto ────────────────────────────────────────────────────────────
 
@@ -83,6 +84,45 @@ class WebSocketClient(AlertSender):
 
     def is_connected(self) -> bool:
         return self._connected
+
+    def request_upload_url(self, clip_id: str, timeout: int = 30) -> tuple[str, str]:
+        """
+        Solicita una presigned URL al servidor via WebSocket y espera la respuesta.
+        Bloquea el hilo llamador hasta recibir la respuesta o agotar el timeout.
+        """
+        if not self._connected or self._ws is None:
+            raise RuntimeError("No hay conexión WebSocket activa")
+
+        event  = threading.Event()
+        result = {"presigned_url": None, "public_url": None}
+
+        with self._lock:
+            self._pending_uploads[clip_id] = (event, result)
+
+        try:
+            self._ws.send(json.dumps({
+                "type":      "request_upload_url",
+                "module_id": self._module_id,
+                "clip_id":   clip_id,
+            }))
+
+            # Espera con polling para detectar desconexión antes del timeout completo
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                if event.wait(timeout=1.0):
+                    break
+                if not self._connected:
+                    raise RuntimeError("Conexión perdida mientras esperaba presigned URL")
+            else:
+                raise RuntimeError(f"Timeout esperando presigned URL para {clip_id}")
+
+            if "error" in result:
+                raise RuntimeError(f"Servidor rechazó presigned URL: {result['error']}")
+
+            return result["presigned_url"], result["public_url"]
+        finally:
+            with self._lock:
+                self._pending_uploads.pop(clip_id, None)
 
     # ── Conexión ──────────────────────────────────────────────────────────
 
@@ -141,9 +181,15 @@ class WebSocketClient(AlertSender):
         }
         ws.send(json.dumps(message))
 
-        # Llamar callback de reconexión para vaciar cola local
+        # Llamar callback de reconexión en thread separado para no bloquear
+        # Thread 3 — flush_pending usa request_upload_url que espera respuestas
+        # WebSocket, y esas respuestas llegan por este mismo thread
         if self._on_reconnect:
-            self._on_reconnect()
+            threading.Thread(
+                target=self._on_reconnect,
+                name="ReconnectFlush",
+                daemon=True,
+            ).start()
 
         # Iniciar heartbeat en thread separado
         threading.Thread(
@@ -173,8 +219,23 @@ class WebSocketClient(AlertSender):
                     self._on_config_update(config)
 
             elif msg_type == "upload_url":
-                # Manejado por S3ClipUploader directamente via HTTP
-                pass
+                clip_id = data.get("clip_id")
+                with self._lock:
+                    pending = self._pending_uploads.get(clip_id)
+                if pending:
+                    event, result = pending
+                    result["presigned_url"] = data.get("presigned_url")
+                    result["public_url"]    = data.get("public_url")
+                    event.set()
+
+            elif msg_type == "upload_url_error":
+                clip_id = data.get("clip_id")
+                with self._lock:
+                    pending = self._pending_uploads.get(clip_id)
+                if pending:
+                    event, result = pending
+                    result["error"] = data.get("error", "Error desconocido")
+                    event.set()
 
             else:
                 logger.warning(f"Mensaje desconocido: {msg_type}")
@@ -183,6 +244,15 @@ class WebSocketClient(AlertSender):
             logger.error(f"Error parseando mensaje: {e}")
 
     def _on_error(self, ws, error) -> None:
+        # websocket-client pasa los close frames como errores (ABNF object)
+        # opcode=8 es un close frame; extraemos el código de los primeros 2 bytes
+        if hasattr(error, 'opcode') and error.opcode == websocket.ABNF.OPCODE_CLOSE:
+            if hasattr(error, 'data') and len(error.data) >= 2:
+                code = int.from_bytes(error.data[:2], 'big')
+                if code == 4001:
+                    logger.error("Conexión rechazada por el servidor: API key inválido — deteniendo reconexión")
+                    self._stop_event.set()
+                    return
         logger.error(f"WebSocket error: {error}")
         self._connected = False
 

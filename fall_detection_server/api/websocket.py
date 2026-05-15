@@ -131,16 +131,22 @@ class WebSocketHandler:
                 module_id= schema.module_id,
                 clip_id=   schema.clip_id,
             )
-            result = await self._generate_upload_url.execute(command)
-
-            # Responder con la presigned URL
-            await websocket.send_text(json.dumps({
-                "type":          "upload_url",
-                "clip_id":       schema.clip_id,
-                "presigned_url": result.presigned_url,
-                "public_url":    result.public_url,
-                "expires_in":    result.expires_in,
-            }))
+            try:
+                result = await self._generate_upload_url.execute(command)
+                await websocket.send_text(json.dumps({
+                    "type":          "upload_url",
+                    "clip_id":       schema.clip_id,
+                    "presigned_url": result.presigned_url,
+                    "public_url":    result.public_url,
+                    "expires_in":    result.expires_in,
+                }))
+            except ValueError as e:
+                logger.warning(f"No se pudo generar presigned URL para {schema.clip_id}: {e}")
+                await websocket.send_text(json.dumps({
+                    "type":    "upload_url_error",
+                    "clip_id": schema.clip_id,
+                    "error":   str(e),
+                }))
 
         elif msg_type == "config_ack":
             logger.info(f"Config ack recibido: {module_id}")

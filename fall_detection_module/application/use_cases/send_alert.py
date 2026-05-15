@@ -87,10 +87,11 @@ class SendAlert:
         """
         logger.info(f"Clip listo: {clip_path}")
 
-        # Subir clip al bucket
+        # Obtener presigned URL via WebSocket y subir clip al bucket
         clip_url = None
         try:
-            clip_url = self._clip_storage.upload(clip_path, clip_id)
+            presigned_url, public_url = self._alert_sender.request_upload_url(clip_id)
+            clip_url = self._clip_storage.upload(clip_path, presigned_url, public_url)
             logger.info(f"Clip subido: {clip_url}")
         except Exception as e:
             logger.error(f"Error subiendo clip {clip_id}: {e}")
@@ -155,7 +156,8 @@ class SendAlert:
             # Tiene clip local pero no fue subido — intentar subir ahora
             if alert.clip_url is None and alert.clip_path is not None:
                 try:
-                    clip_url = self._clip_storage.upload(alert.clip_path, alert.clip_id)
+                    presigned_url, public_url = self._alert_sender.request_upload_url(alert.clip_id)
+                    clip_url = self._clip_storage.upload(alert.clip_path, presigned_url, public_url)
                     alert = Alert(
                         module_id=  alert.module_id,
                         timestamp=  alert.timestamp,

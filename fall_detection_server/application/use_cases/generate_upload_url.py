@@ -32,7 +32,9 @@ class GenerateUploadUrl:
         module = await self._module_repo.find_by_id(command.module_id)
         if module is None:
             raise ValueError(f"Módulo no encontrado: {command.module_id}")
+        if module.user_id is None:
+            raise ValueError(f"Módulo no vinculado a ningún usuario: {command.module_id}")
 
-        result = await self._generator.generate(command.clip_id)
+        result = await self._generator.generate(command.clip_id, module.user_id, command.module_id)
         logger.info(f"Presigned URL generada para clip: {command.clip_id}")
         return result

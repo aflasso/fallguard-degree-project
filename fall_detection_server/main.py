@@ -7,7 +7,7 @@ WebSocket y REST.
 import logging
 import firebase_admin
 from firebase_admin import credentials, firestore_async
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from application.use_cases.disconnect_module import DisconnectModule
@@ -111,7 +111,14 @@ async def startup():
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    api_key:   str = Query(default=""),
+):
+    if not config.MODULE_API_KEY or api_key != config.MODULE_API_KEY:
+        await websocket.accept()
+        await websocket.close(code=4001)
+        return
     await app.state.ws_handler.handle(websocket)
 
 
