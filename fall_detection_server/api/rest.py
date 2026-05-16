@@ -67,6 +67,8 @@ class RestHandler:
         router.post("/clips/upload-url")(self.request_upload_url)
         router.patch("/alerts/{alert_id}/seen")(self.update_alert_status)
         router.get("/clips/read-url")(self.get_clip_read_url)
+        router.delete("/alerts/{alert_id}")(self.delete_alert)
+        router.delete("/alerts")(self.delete_all_alerts)
 
     async def link_module(
         self,
@@ -235,6 +237,33 @@ class RestHandler:
             raise HTTPException(status_code=500, detail=str(e))
 
         return {"read_url": read_url, "expires_in": 900}
+
+    async def delete_alert(
+        self,
+        alert_id: str,
+        token:    dict = Depends(verify_token),
+    ) -> dict:
+        """Elimina una alerta del historial del usuario."""
+        alert = await self._alert_repo.find_by_id(alert_id)
+        if alert is None:
+            raise HTTPException(status_code=404, detail="Alerta no encontrada")
+        if alert.user_id is None:
+            raise HTTPException(status_code=403, detail="Alerta sin usuario asociado")
+        require_same_user(token["uid"], alert.user_id)
+        await self._alert_repo.delete(alert_id)
+        return {"message": "Alerta eliminada"}
+
+    async def delete_all_alerts(
+        self,
+        user_id: str,
+        token:   dict = Depends(verify_token),
+    ) -> dict:
+        """Elimina todas las alertas del historial del usuario."""
+        require_same_user(token["uid"], user_id)
+        alerts = await self._alert_repo.find_by_user(user_id)
+        for alert in alerts:
+            await self._alert_repo.delete(alert.alert_id)
+        return {"message": f"{len(alerts)} alerta(s) eliminada(s)"}
 
     async def update_fcm_token(
         self,

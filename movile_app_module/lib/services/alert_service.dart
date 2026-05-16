@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -114,10 +115,17 @@ class AlertService {
     }).toList();
   }
 
+  static final _refreshController = StreamController<void>.broadcast();
+
+  static void _triggerRefresh() => _refreshController.add(null);
+
   static Stream<List<AlertModel>> alertsStream() async* {
     while (true) {
       yield await _fetchAlerts();
-      await Future.delayed(const Duration(seconds: 30));
+      await Future.any([
+        Future.delayed(const Duration(seconds: 30)),
+        _refreshController.stream.first,
+      ]);
     }
   }
 
@@ -132,6 +140,7 @@ class AlertService {
       throw Exception(
           'updateAlertStatus failed: ${res.statusCode} ${res.body}');
     }
+    _triggerRefresh();
   }
 
   static Stream<AlertModel?> latestAlertStream() =>
@@ -147,5 +156,27 @@ class AlertService {
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return data['read_url'] as String;
+  }
+
+  static Future<void> deleteAlert(String alertId) async {
+    final res = await http.delete(
+      Uri.parse('$_baseUrl/api/alerts/$alertId'),
+      headers: await _headers(),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('deleteAlert failed: ${res.statusCode} ${res.body}');
+    }
+    _triggerRefresh();
+  }
+
+  static Future<void> deleteAllAlerts() async {
+    final res = await http.delete(
+      Uri.parse('$_baseUrl/api/alerts?user_id=$_uid'),
+      headers: await _headers(),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('deleteAllAlerts failed: ${res.statusCode} ${res.body}');
+    }
+    _triggerRefresh();
   }
 }

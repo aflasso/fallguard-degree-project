@@ -17,14 +17,12 @@ class EmergencyAlertScreen extends StatefulWidget {
 class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
   String? _alertId;
   DateTime? _timestamp;
+  AlertStatus _status = AlertStatus.detected;
 
   bool _argsLoaded = false;
   bool _isLoading = false;
 
-  // Web: URL presignada para abrir en el navegador
   String? _webReadUrl;
-
-  // Mobile: controlador de video
   VideoPlayerController? _videoController;
   bool _videoReady = false;
   String? _videoError;
@@ -45,6 +43,13 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
         _alertId = args['alertId'] as String?;
         final ts = args['timestamp'] as String?;
         if (ts != null && ts.isNotEmpty) _timestamp = DateTime.tryParse(ts);
+        final statusStr = args['status'] as String?;
+        if (statusStr != null) {
+          _status = AlertStatus.values.firstWhere(
+            (e) => e.name == statusStr,
+            orElse: () => AlertStatus.detected,
+          );
+        }
       }
       _initVideo();
     }
@@ -79,18 +84,10 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
     super.dispose();
   }
 
-  Future<void> _confirm() async {
+  Future<void> _updateStatus(AlertStatus newStatus) async {
     setState(() => _isLoading = true);
     if (_alertId != null) {
-      await AlertService.updateAlertStatus(_alertId!, AlertStatus.confirmed);
-    }
-    if (mounted) Navigator.pop(context);
-  }
-
-  Future<void> _falseAlarm() async {
-    setState(() => _isLoading = true);
-    if (_alertId != null) {
-      await AlertService.updateAlertStatus(_alertId!, AlertStatus.falseAlarm);
+      await AlertService.updateAlertStatus(_alertId!, newStatus);
     }
     if (mounted) Navigator.pop(context);
   }
@@ -109,6 +106,137 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
     return '${dt.day} ${_months[dt.month - 1]} ${dt.year} · $h:$m';
   }
 
+  // ── Info card content by status ──────────────────────────────────────────
+
+  String get _cardTitle {
+    return switch (_status) {
+      AlertStatus.detected   => 'Posible caída detectada',
+      AlertStatus.confirmed  => 'Caída confirmada',
+      AlertStatus.falseAlarm => 'Falsa alarma',
+    };
+  }
+
+  Color get _cardColor {
+    return switch (_status) {
+      AlertStatus.detected   => AppTheme.alertRedLight,
+      AlertStatus.confirmed  => const Color(0xFFE8F5E9),
+      AlertStatus.falseAlarm => const Color(0xFFF5F5F5),
+    };
+  }
+
+  Color get _cardIconColor {
+    return switch (_status) {
+      AlertStatus.detected   => AppTheme.alertRed,
+      AlertStatus.confirmed  => const Color(0xFF2E7D32),
+      AlertStatus.falseAlarm => AppTheme.textSecondary,
+    };
+  }
+
+  IconData get _cardIcon {
+    return switch (_status) {
+      AlertStatus.detected   => Icons.warning_amber_rounded,
+      AlertStatus.confirmed  => Icons.check_circle_outline,
+      AlertStatus.falseAlarm => Icons.cancel_outlined,
+    };
+  }
+
+  String get _appBarTitle {
+    return switch (_status) {
+      AlertStatus.detected   => 'Caída detectada',
+      AlertStatus.confirmed  => 'Caída confirmada',
+      AlertStatus.falseAlarm => 'Falsa alarma',
+    };
+  }
+
+  // ── Bottom action buttons by status ─────────────────────────────────────
+
+  Widget _buildButtons() {
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
+
+    return switch (_status) {
+      AlertStatus.detected => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _primaryButton(
+              label: 'Confirmar caída',
+              icon: Icons.check_circle_outline,
+              color: AppTheme.alertRed,
+              onPressed: () => _updateStatus(AlertStatus.confirmed),
+            ),
+            const SizedBox(height: 10),
+            _outlineButton(
+              label: 'Falsa alarma',
+              icon: Icons.cancel_outlined,
+              onPressed: () => _updateStatus(AlertStatus.falseAlarm),
+            ),
+          ],
+        ),
+      AlertStatus.confirmed => _outlineButton(
+          label: 'Marcar como falsa alarma',
+          icon: Icons.cancel_outlined,
+          onPressed: () => _updateStatus(AlertStatus.falseAlarm),
+        ),
+      AlertStatus.falseAlarm => _primaryButton(
+          label: 'Marcar como caída real',
+          icon: Icons.check_circle_outline,
+          color: const Color(0xFF2E7D32),
+          onPressed: () => _updateStatus(AlertStatus.confirmed),
+        ),
+    };
+  }
+
+  Widget _primaryButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      height: 52,
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          minimumSize: Size.zero,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(30)),
+        ),
+        icon: Icon(icon, size: 18),
+        label: Text(label,
+            style: GoogleFonts.manrope(
+                fontSize: 15, fontWeight: FontWeight.w700)),
+        onPressed: onPressed,
+      ),
+    );
+  }
+
+  Widget _outlineButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      height: 52,
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          minimumSize: Size.zero,
+          side: const BorderSide(color: AppTheme.divider, width: 1.5),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(30)),
+        ),
+        icon: Icon(icon, size: 18, color: AppTheme.textSecondary),
+        label: Text(label,
+            style: GoogleFonts.manrope(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textSecondary)),
+        onPressed: onPressed,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -120,7 +248,7 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Caída detectada',
+          _appBarTitle,
           style: GoogleFonts.manrope(
             fontSize: 17,
             fontWeight: FontWeight.w700,
@@ -130,7 +258,6 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
       ),
       body: Column(
         children: [
-          // ── Scrollable content ───────────────────────────────────────
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
@@ -164,14 +291,11 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
                           width: 40,
                           height: 40,
                           decoration: BoxDecoration(
-                            color: AppTheme.alertRedLight,
+                            color: _cardColor,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(
-                            Icons.warning_amber_rounded,
-                            color: AppTheme.alertRed,
-                            size: 20,
-                          ),
+                          child: Icon(_cardIcon,
+                              color: _cardIconColor, size: 20),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -179,7 +303,7 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Posible caída detectada',
+                                _cardTitle,
                                 style: GoogleFonts.manrope(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w700,
@@ -202,84 +326,20 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Revisa el clip y confirma si fue una caída real o una falsa alarma.',
-                    style: GoogleFonts.manrope(
-                      fontSize: 13,
-                      color: AppTheme.textSecondary,
-                      height: 1.5,
-                    ),
-                  ),
                   const SizedBox(height: 16),
                 ],
               ),
             ),
           ),
 
-          // ── Buttons — fixed at bottom ────────────────────────────────
+          // ── Buttons ──────────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
             decoration: const BoxDecoration(
               color: AppTheme.background,
               border: Border(top: BorderSide(color: AppTheme.divider)),
             ),
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        height: 52,
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.alertRed,
-                            foregroundColor: Colors.white,
-                            minimumSize: Size.zero,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                          ),
-                          icon: const Icon(Icons.check_circle_outline, size: 18),
-                          label: Text(
-                            'Confirmar caída',
-                            style: GoogleFonts.manrope(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          onPressed: _confirm,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        height: 52,
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: Size.zero,
-                            side: const BorderSide(
-                                color: AppTheme.divider, width: 1.5),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                          ),
-                          icon: const Icon(Icons.cancel_outlined,
-                              size: 18, color: AppTheme.textSecondary),
-                          label: Text(
-                            'Falsa alarma',
-                            style: GoogleFonts.manrope(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
-                          onPressed: _falseAlarm,
-                        ),
-                      ),
-                    ],
-                  ),
+            child: _buildButtons(),
           ),
         ],
       ),
@@ -291,15 +351,9 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
       return _videoPlaceholder(Icons.error_outline, _videoError!);
     }
 
-    // ── Web: mostrar botón para abrir en pestaña nueva ────────────────────
     if (kIsWeb) {
       if (_webReadUrl == null) {
-        return Container(
-          color: Colors.black,
-          child: const Center(
-            child: CircularProgressIndicator(color: Colors.white70),
-          ),
-        );
+        return _loadingIndicator();
       }
       return Container(
         color: const Color(0xFF1A1A1A),
@@ -313,33 +367,21 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
                 backgroundColor: Colors.white12,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
+                    borderRadius: BorderRadius.circular(20)),
               ),
               icon: const Icon(Icons.open_in_new, size: 16),
-              label: Text(
-                'Abrir clip en el navegador',
-                style: GoogleFonts.manrope(fontSize: 13),
-              ),
-              onPressed: () => launchUrl(
-                Uri.parse(_webReadUrl!),
-                mode: LaunchMode.externalApplication,
-              ),
+              label: Text('Abrir clip en el navegador',
+                  style: GoogleFonts.manrope(fontSize: 13)),
+              onPressed: () => launchUrl(Uri.parse(_webReadUrl!),
+                  mode: LaunchMode.externalApplication),
             ),
           ],
         ),
       );
     }
 
-    // ── Mobile: video_player ──────────────────────────────────────────────
-    if (!_videoReady) {
-      return Container(
-        color: Colors.black,
-        child: const Center(
-          child: CircularProgressIndicator(color: Colors.white70),
-        ),
-      );
-    }
+    if (!_videoReady) return _loadingIndicator();
+
     return GestureDetector(
       onTap: _togglePlayPause,
       child: Stack(
@@ -348,21 +390,17 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
           VideoPlayer(_videoController!),
           ValueListenableBuilder<VideoPlayerValue>(
             valueListenable: _videoController!,
-            builder: (_, value, __) {
-              return AnimatedOpacity(
-                opacity: value.isPlaying ? 0.0 : 1.0,
-                duration: const Duration(milliseconds: 200),
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.black45,
-                    shape: BoxShape.circle,
-                  ),
-                  padding: const EdgeInsets.all(14),
-                  child: const Icon(Icons.play_arrow,
-                      color: Colors.white, size: 36),
-                ),
-              );
-            },
+            builder: (_, value, __) => AnimatedOpacity(
+              opacity: value.isPlaying ? 0.0 : 1.0,
+              duration: const Duration(milliseconds: 200),
+              child: Container(
+                decoration: const BoxDecoration(
+                    color: Colors.black45, shape: BoxShape.circle),
+                padding: const EdgeInsets.all(14),
+                child: const Icon(Icons.play_arrow,
+                    color: Colors.white, size: 36),
+              ),
+            ),
           ),
           Positioned(
             bottom: 0,
@@ -371,7 +409,8 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
             child: VideoProgressIndicator(
               _videoController!,
               allowScrubbing: true,
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+              padding:
+                  const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
               colors: const VideoProgressColors(
                 playedColor: Colors.white,
                 backgroundColor: Colors.white24,
@@ -384,6 +423,12 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
     );
   }
 
+  Widget _loadingIndicator() => Container(
+        color: Colors.black,
+        child: const Center(
+            child: CircularProgressIndicator(color: Colors.white70)),
+      );
+
   Widget _videoPlaceholder(IconData icon, String message) {
     return Container(
       color: const Color(0xFF1A1A1A),
@@ -392,10 +437,9 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
         children: [
           Icon(icon, color: Colors.white38, size: 40),
           const SizedBox(height: 8),
-          Text(
-            message,
-            style: GoogleFonts.manrope(color: Colors.white38, fontSize: 13),
-          ),
+          Text(message,
+              style: GoogleFonts.manrope(
+                  color: Colors.white38, fontSize: 13)),
         ],
       ),
     );
