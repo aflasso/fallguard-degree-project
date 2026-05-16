@@ -269,7 +269,11 @@ class _EmergencyAlertsScreenState extends State<EmergencyAlertsScreen> {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeThumbColor: AppTheme.primary,
+            thumbColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? AppTheme.primary
+                  : null,
+            ),
           ),
         ],
       ),
