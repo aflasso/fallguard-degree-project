@@ -36,18 +36,20 @@ class FirestoreModuleRepository(FirestoreRepository[Module], ModuleRepository):
 
     def _to_dict(self, entity: Module) -> dict:
         return {
-            "module_id": entity.module_id,
-            "status":    entity.status.value,
-            "last_seen": entity.last_seen,
-            "user_id":   entity.user_id,
-            "cameras":   [{"id": c.id, "name": c.name} for c in entity.cameras],
+            "module_id":    entity.module_id,
+            "status":       entity.status.value,
+            "last_seen":    entity.last_seen,
+            "user_id":      entity.user_id,
+            "cameras":      [{"id": c.id, "name": c.name} for c in entity.cameras],
+            "display_name": entity.display_name,
         }
 
     def _from_dict(self, data: dict) -> Module:
         return Module(
-            module_id= data["module_id"],
-            status=    ModuleStatus(data["status"]),
-            last_seen= data.get("last_seen"),
-            user_id=   data.get("user_id"),
-            cameras=   [CameraInfo(id=c["id"], name=c["name"]) for c in data.get("cameras", [])],
+            module_id=    data["module_id"],
+            status=       ModuleStatus(data["status"]),
+            last_seen=    data.get("last_seen"),
+            user_id=      data.get("user_id"),
+            cameras=      [CameraInfo(id=c["id"], name=c["name"]) for c in data.get("cameras", [])],
+            display_name= data.get("display_name"),
         )

@@ -35,8 +35,13 @@ class LinkModuleSchema(BaseModel):
 
 
 class ModuleStatusSchema(BaseModel):
-    module_id:  str
-    status:     str
-    last_seen:  Optional[str] = None
-    cameras:    List[CameraInfoSchema] = []
-    user_id:    Optional[str] = None
+    module_id:    str
+    status:       str
+    last_seen:    Optional[str] = None
+    cameras:      List[CameraInfoSchema] = []
+    user_id:      Optional[str] = None
+    display_name: Optional[str] = None
+
+
+class RenameModuleSchema(BaseModel):
+    display_name: str

@@ -76,7 +76,7 @@ Toda la cableada ocurre en `main.py` → `startup()`. No hay service locator ni 
 | `User` | `user_id`, `email`, `fcm_token` | Usuario de la app móvil. `fcm_token` es necesario para recibir push. |
 | `Alert` | `alert_id`, `module_id`, `user_id`, `timestamp`, `confidence`, `clip_url`, `seen`, `status` | Evento de caída confirmado. |
 | `ModuleStatus` | `CONNECTED`, `DISCONNECTED` | Estado de conexión del módulo. |
-| `AlertStatus` | `PENDING`, `CONFIRMED`, `FALSE_ALARM` | Estado que el usuario puede actualizar desde la app. |
+| `AlertStatus` | `DETECTED`, `CONFIRMED`, `FALSE_ALARM` | Estado de la alerta. `DETECTED` es el estado inicial; el usuario puede confirmar o descartar. |
 
 ---
 
@@ -151,9 +151,14 @@ El token se verifica con Firebase Auth. El `uid` del token debe coincidir con el
 | `PATCH` | `/api/users/{user_id}/fcm-token` | Actualiza el FCM token del usuario |
 | `POST` | `/api/modules/link` | Vincula módulo a usuario. Retorna `403` si ya está vinculado a otro usuario. |
 | `GET` | `/api/modules/status/{module_id}` | Estado del módulo: `status`, `last_seen`, `cameras` |
-| `GET` | `/api/alerts?user_id={uid}` | Historial de alertas del usuario (desc por timestamp) |
-| `PATCH` | `/api/alerts/{alert_id}/seen` | Marca alerta como vista y actualiza su status |
-| `POST` | `/api/clips/upload-url` | Genera presigned URL para subir un clip — **solo para la app móvil**, no para el módulo local |
+| `GET` | `/api/alerts?user_id={uid}[&status=detected\|confirmed\|falseAlarm]` | Historial de alertas del usuario (desc por timestamp). Filtro de estado opcional. |
+| `PATCH` | `/api/alerts/{alert_id}/seen` | Actualiza el status de una alerta. Solo acepta `confirmed` o `falseAlarm`. |
+| `DELETE` | `/api/alerts/{alert_id}` | Elimina una alerta del historial. Verifica que pertenezca al usuario del token. |
+| `DELETE` | `/api/alerts?user_id={uid}` | Elimina todas las alertas del usuario. |
+| `GET` | `/api/clips/read-url?alert_id={id}` | Genera presigned URL de lectura GCS (15 min) para el clip de una alerta. |
+| `POST` | `/api/clips/upload-url` | Genera presigned URL para subir un clip — **solo para la app móvil**, no para el módulo local. |
+| `POST` | `/api/auth/change-password` | Cambia la contraseña de una cuenta `password` (no Google). Requiere token en header. |
+| `POST` | `/api/auth/reset-password` | Genera link de restablecimiento de contraseña y lo retorna. Sin autenticación requerida. |
 
 > El módulo local solicita presigned URLs via WebSocket (`request_upload_url`), no via REST.
 
@@ -177,16 +182,19 @@ Los repositorios implementan una clase base genérica `FirestoreRepository[T]` e
 
 `infrastructure/firebase/fcm_sender.py` implementa el puerto `NotificationSender`. Envía dos tipos de push:
 
-- **`send_fall_alert`** — título "Caída detectada", incluye `alert_id`, `timestamp`, `clip_url` en el payload `data`.
+- **`send_fall_alert`** — incluye campo `notification` (título + body) para que Android muestre la notificación del sistema en background, más `data` con `alert_id`, `timestamp`, `clip_url`. Prioridad `high` / `max` para heads-up display.
 - **`send_module_disconnected`** — notifica cuando el módulo deja de enviar heartbeats.
 
 ### GCS (Google Cloud Storage)
 
-`infrastructure/gcs/presigned_url.py` genera presigned URLs v4 para PUT con expiración de 5 minutos.
+`infrastructure/gcs/presigned_url.py` genera dos tipos de presigned URLs v4:
+
+- **`generate_upload_url`** — PUT, expiración 5 min. Usada por el módulo local via WebSocket para subir clips.
+- **`generate_read_url`** — GET, expiración 15 min. Usada por la app móvil via `GET /api/clips/read-url` para reproducir clips. Se genera bajo demanda al abrir la pantalla de revisión, no al crear la alerta.
 
 Path del objeto en el bucket: `clips/{user_id}/{module_id}/{clip_id}.mp4`
 
-El módulo local hace el PUT directamente a GCS — el servidor solo recibe la `public_url` resultante en el mensaje `fall_alert`.
+El módulo local hace el PUT directamente a GCS — el servidor solo recibe la `public_url` resultante en el mensaje `fall_alert`. Los clips subidos via presigned URL **no tienen Firebase download token**, por lo que `firebase_storage.getDownloadURL()` no funciona — siempre usar `generate_read_url`.
 
 ### Reglas de Firebase Storage recomendadas
 
@@ -330,6 +338,7 @@ fall_detection_server/
 │       ├── module_schemas.py
 │       ├── alert_schemas.py
 │       ├── user_schemas.py
+│       ├── auth_schemas.py          ← ChangePasswordSchema, ResetPasswordSchema
 │       └── __init__.py
 │
 └── tests/
@@ -359,3 +368,9 @@ Permite testear casos de uso con repositorios en memoria sin tocar Firebase.
 
 **¿Por qué `require_same_user` en cada endpoint REST?**
 Un usuario autenticado en Firebase solo puede leer y modificar sus propios recursos.
+
+**¿Por qué la presigned URL de lectura se genera bajo demanda y no al crear la alerta?**
+Las URLs tienen 15 min de vigencia. Si se generaran al momento de la alerta, expirarían antes de que el usuario abra la app. Al generarlas cuando el usuario abre la pantalla de revisión, los 15 min empiezan desde ese momento.
+
+**¿Por qué `AlertStatus` usa `DETECTED` y no `PENDING`?**
+Documentos antiguos en Firestore usaban `"pending"` — el repositorio normaliza ese valor a `"detected"` via `_normalize_status()` para mantener compatibilidad hacia atrás sin migración de datos.

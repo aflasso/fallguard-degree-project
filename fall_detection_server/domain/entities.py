@@ -27,11 +27,12 @@ class CameraInfo:
 
 @dataclass
 class Module:
-    module_id:   str
-    status:      ModuleStatus          = ModuleStatus.DISCONNECTED
-    last_seen:   Optional[datetime]    = None
-    user_id:     Optional[str]         = None
-    cameras:     List[CameraInfo]      = field(default_factory=list)
+    module_id:    str
+    status:       ModuleStatus          = ModuleStatus.DISCONNECTED
+    last_seen:    Optional[datetime]    = None
+    user_id:      Optional[str]         = None
+    cameras:      List[CameraInfo]      = field(default_factory=list)
+    display_name: Optional[str]         = None
 
 
 @dataclass

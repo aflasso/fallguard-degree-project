@@ -19,6 +19,7 @@ from api.schemas import (
     CameraInfoSchema,
     ChangePasswordSchema,
     ResetPasswordSchema,
+    RenameModuleSchema,
 )
 from api.schemas.alert_schemas import RequestUploadUrlSchema, UpdateAlertStatusSchema
 from application.dtos.alert_dtos import GenerateUploadUrlCommand
@@ -74,6 +75,7 @@ class RestHandler:
         router.get("/clips/read-url")(self.get_clip_read_url)
         router.delete("/alerts/{alert_id}")(self.delete_alert)
         router.delete("/alerts")(self.delete_all_alerts)
+        router.patch("/modules/{module_id}/name")(self.rename_module)
 
     async def link_module(
         self,
@@ -108,12 +110,30 @@ class RestHandler:
         require_same_user(token["uid"], module.user_id)
 
         return ModuleStatusSchema(
-            module_id= module.module_id,
-            status=    module.status.value,
-            last_seen= module.last_seen.isoformat() if module.last_seen else None,
-            cameras=   [CameraInfoSchema(id=c.id, name=c.name) for c in module.cameras],
-            user_id=   module.user_id,
+            module_id=    module.module_id,
+            status=       module.status.value,
+            last_seen=    module.last_seen.isoformat() if module.last_seen else None,
+            cameras=      [CameraInfoSchema(id=c.id, name=c.name) for c in module.cameras],
+            user_id=      module.user_id,
+            display_name= module.display_name,
         )
+
+    async def rename_module(
+        self,
+        module_id: str,
+        body:      RenameModuleSchema,
+        token:     dict = Depends(verify_token),
+    ) -> dict:
+        """Asigna o actualiza el nombre visible del módulo."""
+        module = await self._module_repo.find_by_id(module_id)
+        if module is None:
+            raise HTTPException(status_code=404, detail="Módulo no encontrado")
+        if module.user_id is None:
+            raise HTTPException(status_code=403, detail="Módulo no vinculado a ningún usuario")
+        require_same_user(token["uid"], module.user_id)
+        module.display_name = body.display_name.strip() or None
+        await self._module_repo.save(module)
+        return {"message": "Nombre actualizado"}
 
     async def request_upload_url(
         self,
