@@ -101,11 +101,11 @@ class AlertService {
     return raw.map((json) {
       final m = json as Map<String, dynamic>;
       return AlertModel(
-        id: m['id'] as String,
+        id: m['alert_id'] as String,
         timestamp: DateTime.parse(m['timestamp'] as String),
         status: AlertStatus.values.firstWhere(
-          (e) => e.name == (m['status'] as String? ?? 'pending'),
-          orElse: () => AlertStatus.pending,
+          (e) => e.name == (m['status'] as String? ?? 'detected'),
+          orElse: () => AlertStatus.detected,
         ),
         location: m['location'] as String? ?? '',
         elderlyName: m['elderlyName'] as String? ?? '',
@@ -136,4 +136,16 @@ class AlertService {
 
   static Stream<AlertModel?> latestAlertStream() =>
       alertsStream().map((list) => list.isEmpty ? null : list.first);
+
+  static Future<String> getClipReadUrl(String alertId) async {
+    final res = await http.get(
+      Uri.parse('$_baseUrl/api/clips/read-url?alert_id=$alertId'),
+      headers: await _headers(),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('getClipReadUrl failed: ${res.statusCode} ${res.body}');
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return data['read_url'] as String;
+  }
 }

@@ -1,6 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
-enum AlertStatus { confirmed, dismissed, falseAlarm, pending }
+enum AlertStatus { detected, confirmed, falseAlarm }
 
 class AlertModel {
   final String id;
@@ -19,40 +17,14 @@ class AlertModel {
     required this.description,
   });
 
-  factory AlertModel.fromFirestore(
-      DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data()!;
-    return AlertModel(
-      id: doc.id,
-      timestamp: (data['timestamp'] as Timestamp).toDate(),
-      status: AlertStatus.values.firstWhere(
-        (e) => e.name == (data['status'] as String? ?? 'pending'),
-        orElse: () => AlertStatus.pending,
-      ),
-      location: data['location'] as String? ?? '',
-      elderlyName: data['elderlyName'] as String? ?? '',
-      description: data['description'] as String? ?? '',
-    );
-  }
-
-  Map<String, dynamic> toFirestore() => {
-        'timestamp': Timestamp.fromDate(timestamp),
-        'status': status.name,
-        'location': location,
-        'elderlyName': elderlyName,
-        'description': description,
-      };
-
   String get statusLabel {
     switch (status) {
+      case AlertStatus.detected:
+        return 'SIN CONFIRMAR';
       case AlertStatus.confirmed:
         return 'CONFIRMADA';
-      case AlertStatus.dismissed:
-        return 'DESCARTADA';
       case AlertStatus.falseAlarm:
         return 'FALSA ALARMA';
-      case AlertStatus.pending:
-        return 'PENDIENTE';
     }
   }
 }

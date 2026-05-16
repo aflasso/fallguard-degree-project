@@ -14,6 +14,11 @@ from infrastructure.firestore.base_repository import FirestoreRepository
 logger = logging.getLogger(__name__)
 
 
+def _normalize_status(value: str) -> str:
+    # "pending" was the old value for the initial state; map to "detected"
+    return "detected" if value == "pending" else value
+
+
 class FirestoreAlertRepository(FirestoreRepository[Alert], AlertRepository):
 
     def __init__(self, db: AsyncClient):
@@ -61,5 +66,5 @@ class FirestoreAlertRepository(FirestoreRepository[Alert], AlertRepository):
             confidence= data["confidence"],
             clip_url=   data.get("clip_url"),
             seen=       data.get("seen", False),
-            status=     AlertStatus(data.get("status", "pending")),
+            status=     AlertStatus(_normalize_status(data.get("status", "detected"))),
         )

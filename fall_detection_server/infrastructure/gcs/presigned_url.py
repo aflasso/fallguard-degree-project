@@ -22,9 +22,10 @@ class GCSPresignedUrlGenerator(UploadUrlGenerator):
             config.FIREBASE_CREDENTIALS_PATH,
             scopes=["https://www.googleapis.com/auth/cloud-platform"],
         )
-        self._client     = storage.Client(credentials=credentials)
-        self._bucket     = self._client.bucket(config.GCS_BUCKET_NAME)
-        self._expires_in = 300   # 5 minutos
+        self._client          = storage.Client(credentials=credentials)
+        self._bucket          = self._client.bucket(config.GCS_BUCKET_NAME)
+        self._expires_in      = 300   # 5 minutos (PUT)
+        self._read_expires_in = 900   # 15 minutos (GET)
 
     async def generate(self, clip_id: str, user_id: str, module_id: str) -> UploadUrlResult:
         """
@@ -58,3 +59,17 @@ class GCSPresignedUrlGenerator(UploadUrlGenerator):
         except Exception as e:
             logger.error(f"Error generando presigned URL: {e}")
             raise RuntimeError(f"No se pudo generar presigned URL: {e}")
+
+    async def generate_read_url(self, blob_name: str) -> str:
+        blob = self._bucket.blob(blob_name)
+        try:
+            read_url = blob.generate_signed_url(
+                version=    "v4",
+                expiration= datetime.timedelta(seconds=self._read_expires_in),
+                method=     "GET",
+            )
+            logger.info(f"Presigned read URL generada para: {blob_name}")
+            return read_url
+        except Exception as e:
+            logger.error(f"Error generando presigned read URL: {e}")
+            raise RuntimeError(f"No se pudo generar presigned read URL: {e}")

@@ -21,13 +21,23 @@ class FCMNotificationSender(NotificationSender):
 
         message = messaging.Message(
             token= user.fcm_token,
+            notification= messaging.Notification(
+                title= "Caída detectada",
+                body=  "Se detectó una posible caída en tu hogar",
+            ),
+            android= messaging.AndroidConfig(
+                priority= "high",
+                notification= messaging.AndroidNotification(
+                    priority=            "max",
+                    default_sound=        True,
+                    default_vibrate_timings= True,
+                ),
+            ),
             data= {
                 "type":      "fall_detected",
                 "alert_id":  alert.alert_id,
                 "timestamp": alert.timestamp.isoformat(),
                 "clip_url":  alert.clip_url or "",
-                "title":     "Caída detectada",
-                "body":      "Se detectó una caída en tu hogar",
             },
         )
 

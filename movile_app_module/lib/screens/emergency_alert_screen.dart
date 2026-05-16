@@ -1,5 +1,8 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
 import '../models/alert_model.dart';
 import '../services/alert_service.dart';
 import '../theme/app_theme.dart';
@@ -11,58 +14,69 @@ class EmergencyAlertScreen extends StatefulWidget {
   State<EmergencyAlertScreen> createState() => _EmergencyAlertScreenState();
 }
 
-class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulseController;
-  late final Animation<double> _pulseAnimation;
-
-  // Datos de la alerta recibidos como argumentos de ruta
+class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
   String? _alertId;
-  String _location = 'Ubicación desconocida';
-  String _elderlyName = 'Paciente';
-  late final DateTime _openTime;
+  DateTime? _timestamp;
+
+  bool _argsLoaded = false;
   bool _isLoading = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _openTime = DateTime.now();
-    _pulseController = AnimationController(
-      duration: const Duration(milliseconds: 900),
-      vsync: this,
-    )..repeat(reverse: true);
-    _pulseAnimation = Tween<double>(begin: 0.92, end: 1.08).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
-  }
+  // Web: URL presignada para abrir en el navegador
+  String? _webReadUrl;
+
+  // Mobile: controlador de video
+  VideoPlayerController? _videoController;
+  bool _videoReady = false;
+  String? _videoError;
+
+  static const List<String> _months = [
+    'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+    'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+  ];
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Leer argumentos solo la primera vez
-    if (_alertId == null) {
+    if (!_argsLoaded) {
+      _argsLoaded = true;
       final args =
           ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
       if (args != null) {
         _alertId = args['alertId'] as String?;
-        final location = args['location'] as String? ?? '';
-        final elderlyName = args['elderlyName'] as String? ?? '';
-        if (location.isNotEmpty) _location = location;
-        if (elderlyName.isNotEmpty) _elderlyName = elderlyName;
+        final ts = args['timestamp'] as String?;
+        if (ts != null && ts.isNotEmpty) _timestamp = DateTime.tryParse(ts);
       }
+      _initVideo();
     }
+  }
+
+  void _initVideo() {
+    if (_alertId == null) return;
+    AlertService.getClipReadUrl(_alertId!).then((readUrl) {
+      if (!mounted) return;
+      if (kIsWeb) {
+        setState(() => _webReadUrl = readUrl);
+        return;
+      }
+      final controller = VideoPlayerController.networkUrl(Uri.parse(readUrl));
+      _videoController = controller;
+      controller.initialize().then((_) {
+        if (!mounted) return;
+        setState(() => _videoReady = true);
+        controller.play();
+        controller.setLooping(true);
+      }).catchError((e) {
+        if (mounted) setState(() => _videoError = 'Error al cargar el video: $e');
+      });
+    }).catchError((e) {
+      if (mounted) setState(() => _videoError = 'Error al obtener URL del clip: $e');
+    });
   }
 
   @override
   void dispose() {
-    _pulseController.dispose();
+    _videoController?.dispose();
     super.dispose();
-  }
-
-  String get _formattedTime {
-    final h = _openTime.hour.toString().padLeft(2, '0');
-    final m = _openTime.minute.toString().padLeft(2, '0');
-    return '$h:$m';
   }
 
   Future<void> _confirm() async {
@@ -81,327 +95,309 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
     if (mounted) Navigator.pop(context);
   }
 
+  void _togglePlayPause() {
+    final ctrl = _videoController;
+    if (ctrl == null) return;
+    setState(() {
+      ctrl.value.isPlaying ? ctrl.pause() : ctrl.play();
+    });
+  }
+
+  String _formatTimestamp(DateTime dt) {
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '${dt.day} ${_months[dt.month - 1]} ${dt.year} · $h:$m';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF8B0000),
-              Color(0xFF6B0000),
-              Color(0xFF3D0000),
-            ],
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+          color: AppTheme.textPrimary,
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'Caída detectada',
+          style: GoogleFonts.manrope(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: AppTheme.textPrimary,
           ),
         ),
-        child: SafeArea(
-          child: Stack(
-            children: [
-              // Faded house background
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: 220,
-                child: Opacity(
-                  opacity: 0.12,
-                  child: CustomPaint(painter: _HousePainter()),
-                ),
-              ),
-
-              // Main content
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  children: [
-                    // ── Top bar ────────────────────────────────────
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.shield,
-                                  color: Colors.white, size: 20),
-                              const SizedBox(width: 6),
-                              Text(
-                                'FallGuard',
-                                style: GoogleFonts.manrope(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFB71C1C),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              'URGENTE',
-                              style: GoogleFonts.manrope(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                                letterSpacing: 1.2,
-                              ),
-                            ),
-                          ),
-                        ],
+      ),
+      body: Column(
+        children: [
+          // ── Scrollable content ───────────────────────────────────────
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // ── Video ──────────────────────────────────────────
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 240),
+                      child: AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: _buildVideoArea(),
                       ),
                     ),
-                    const SizedBox(height: 20),
+                  ),
+                  const SizedBox(height: 20),
 
-                    // ── Pulsing Warning Icon ───────────────────────
-                    AnimatedBuilder(
-                      animation: _pulseAnimation,
-                      builder: (context, child) => Transform.scale(
-                        scale: _pulseAnimation.value,
-                        child: child,
-                      ),
-                      child: Container(
-                        width: 96,
-                        height: 96,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFB71C1C),
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.red.withValues(alpha: 0.5),
-                              blurRadius: 32,
-                              spreadRadius: 12,
-                            ),
-                          ],
-                        ),
-                        child: const Icon(
-                          Icons.warning_rounded,
-                          color: Colors.white,
-                          size: 48,
-                        ),
-                      ),
+                  // ── Info card ──────────────────────────────────────
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppTheme.divider),
                     ),
-                    const SizedBox(height: 20),
-
-                    // ── Time ──────────────────────────────────────
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    child: Row(
                       children: [
                         Container(
-                          width: 7,
-                          height: 7,
-                          decoration: const BoxDecoration(
-                            color: Colors.orange,
-                            shape: BoxShape.circle,
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: AppTheme.alertRedLight,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(
+                            Icons.warning_amber_rounded,
+                            color: AppTheme.alertRed,
+                            size: 20,
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _formattedTime,
-                          style: GoogleFonts.manrope(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ── Main Message ──────────────────────────────
-                    Text(
-                      'Se detectó una\nposible caída',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.manrope(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'El sensor ha registrado un impacto inusual.\nVerifica el estado del paciente de inmediato.',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.manrope(
-                        fontSize: 14,
-                        color: Colors.white60,
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-
-                    // ── Info Chips ────────────────────────────────
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _infoChip('USUARIO', _elderlyName),
                         const SizedBox(width: 12),
-                        _infoChip('UBICACIÓN', _location),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Posible caída detectada',
+                                style: GoogleFonts.manrope(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.textPrimary,
+                                ),
+                              ),
+                              if (_timestamp != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  _formatTimestamp(_timestamp!),
+                                  style: GoogleFonts.manrope(
+                                    fontSize: 12,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 32),
-
-                    // ── Confirm Button ────────────────────────────
-                    SizedBox(
-                      width: double.infinity,
-                      height: 54,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: AppTheme.alertRed,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30),
-                          ),
-                        ),
-                        onPressed: _isLoading ? null : _confirm,
-                        child: _isLoading
-                            ? const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppTheme.alertRed,
-                                ),
-                              )
-                            : Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.check_circle_outline,
-                                      color: AppTheme.alertRed, size: 18),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Confirmar caída',
-                                    style: GoogleFonts.manrope(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.alertRed,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                      ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Revisa el clip y confirma si fue una caída real o una falsa alarma.',
+                    style: GoogleFonts.manrope(
+                      fontSize: 13,
+                      color: AppTheme.textSecondary,
+                      height: 1.5,
                     ),
-                    const SizedBox(height: 12),
-
-                    // ── False Alarm Button ────────────────────────
-                    SizedBox(
-                      width: double.infinity,
-                      height: 54,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(
-                              color: Colors.white38, width: 1.5),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30),
-                          ),
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: _isLoading ? null : _falseAlarm,
-                        child: Text(
-                          'Falsa alarma',
-                          style: GoogleFonts.manrope(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+
+          // ── Buttons — fixed at bottom ────────────────────────────────
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+            decoration: const BoxDecoration(
+              color: AppTheme.background,
+              border: Border(top: BorderSide(color: AppTheme.divider)),
+            ),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        height: 52,
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.alertRed,
+                            foregroundColor: Colors.white,
+                            minimumSize: Size.zero,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                          ),
+                          icon: const Icon(Icons.check_circle_outline, size: 18),
+                          label: Text(
+                            'Confirmar caída',
+                            style: GoogleFonts.manrope(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          onPressed: _confirm,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 52,
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: Size.zero,
+                            side: const BorderSide(
+                                color: AppTheme.divider, width: 1.5),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                          ),
+                          icon: const Icon(Icons.cancel_outlined,
+                              size: 18, color: AppTheme.textSecondary),
+                          label: Text(
+                            'Falsa alarma',
+                            style: GoogleFonts.manrope(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                          onPressed: _falseAlarm,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _infoChip(String label, String value) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: GoogleFonts.manrope(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: Colors.white60,
-              letterSpacing: 0.5,
-            ),
+  Widget _buildVideoArea() {
+    if (_videoError != null) {
+      return _videoPlaceholder(Icons.error_outline, _videoError!);
+    }
+
+    // ── Web: mostrar botón para abrir en pestaña nueva ────────────────────
+    if (kIsWeb) {
+      if (_webReadUrl == null) {
+        return Container(
+          color: Colors.black,
+          child: const Center(
+            child: CircularProgressIndicator(color: Colors.white70),
           ),
-          const SizedBox(height: 3),
-          Text(
-            value,
-            style: GoogleFonts.manrope(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
+        );
+      }
+      return Container(
+        color: const Color(0xFF1A1A1A),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.videocam_outlined, color: Colors.white54, size: 40),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white12,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              icon: const Icon(Icons.open_in_new, size: 16),
+              label: Text(
+                'Abrir clip en el navegador',
+                style: GoogleFonts.manrope(fontSize: 13),
+              ),
+              onPressed: () => launchUrl(
+                Uri.parse(_webReadUrl!),
+                mode: LaunchMode.externalApplication,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // ── Mobile: video_player ──────────────────────────────────────────────
+    if (!_videoReady) {
+      return Container(
+        color: Colors.black,
+        child: const Center(
+          child: CircularProgressIndicator(color: Colors.white70),
+        ),
+      );
+    }
+    return GestureDetector(
+      onTap: _togglePlayPause,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          VideoPlayer(_videoController!),
+          ValueListenableBuilder<VideoPlayerValue>(
+            valueListenable: _videoController!,
+            builder: (_, value, __) {
+              return AnimatedOpacity(
+                opacity: value.isPlaying ? 0.0 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.black45,
+                    shape: BoxShape.circle,
+                  ),
+                  padding: const EdgeInsets.all(14),
+                  child: const Icon(Icons.play_arrow,
+                      color: Colors.white, size: 36),
+                ),
+              );
+            },
+          ),
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: VideoProgressIndicator(
+              _videoController!,
+              allowScrubbing: true,
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+              colors: const VideoProgressColors(
+                playedColor: Colors.white,
+                backgroundColor: Colors.white24,
+                bufferedColor: Colors.white38,
+              ),
             ),
           ),
         ],
       ),
     );
   }
-}
 
-class _HousePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.fill;
-
-    _drawHouse(canvas, paint,
-        left: size.width * 0.05,
-        top: size.height * 0.25,
-        width: size.width * 0.28,
-        height: size.height * 0.75);
-
-    _drawHouse(canvas, paint,
-        left: size.width * 0.35,
-        top: size.height * 0.05,
-        width: size.width * 0.3,
-        height: size.height * 0.95);
-
-    _drawHouse(canvas, paint,
-        left: size.width * 0.7,
-        top: size.height * 0.35,
-        width: size.width * 0.28,
-        height: size.height * 0.65);
+  Widget _videoPlaceholder(IconData icon, String message) {
+    return Container(
+      color: const Color(0xFF1A1A1A),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: Colors.white38, size: 40),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: GoogleFonts.manrope(color: Colors.white38, fontSize: 13),
+          ),
+        ],
+      ),
+    );
   }
-
-  void _drawHouse(Canvas canvas, Paint paint,
-      {required double left,
-      required double top,
-      required double width,
-      required double height}) {
-    final path = Path();
-    path.moveTo(left, top + height * 0.35);
-    path.lineTo(left + width / 2, top);
-    path.lineTo(left + width, top + height * 0.35);
-    path.lineTo(left + width, top + height);
-    path.lineTo(left, top + height);
-    path.close();
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

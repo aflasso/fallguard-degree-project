@@ -14,9 +14,9 @@ class ModuleStatus(Enum):
 
 
 class AlertStatus(Enum):
-    PENDING     = "pending"
-    CONFIRMED   = "confirmed"
-    FALSE_ALARM = "falseAlarm"
+    DETECTED    = "detected"    # caída detectada por el módulo, sin confirmar
+    CONFIRMED   = "confirmed"   # usuario confirmó que fue una caída real
+    FALSE_ALARM = "falseAlarm"  # usuario descartó como falsa alarma
 
 
 @dataclass
@@ -50,4 +50,4 @@ class Alert:
     user_id:    Optional[str] = None
     clip_url:   Optional[str] = None
     seen:       bool          = False
-    status:     AlertStatus   = AlertStatus.PENDING
+    status:     AlertStatus   = AlertStatus.DETECTED

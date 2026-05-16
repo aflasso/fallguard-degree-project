@@ -33,3 +33,4 @@ class AlertResponseSchema(BaseModel):
     confidence: float
     clip_url:   Optional[str] = None
     seen:       bool          = False
+    status:     str           = "detected"

@@ -19,15 +19,20 @@ class UploadUrlGenerator(ABC):
     @abstractmethod
     async def generate(self, clip_id: str, user_id: str, module_id: str) -> UploadUrlResult:
         """
-        Genera una presigned URL para subir un clip al bucket.
+        Genera una presigned URL para subir (PUT) un clip al bucket.
+        Path resultante: clips/{user_id}/{module_id}/{clip_id}.mp4
+        """
+        ...
+
+    @abstractmethod
+    async def generate_read_url(self, blob_name: str) -> str:
+        """
+        Genera una presigned URL para leer (GET) un objeto del bucket.
+        Expira en 15 minutos.
 
         Args:
-            clip_id:   identificador único del clip
-            user_id:   uid del usuario dueño del clip
-            module_id: id del módulo que genera el clip
-            Path resultante: clips/{user_id}/{module_id}/{clip_id}.mp4
-
+            blob_name: path del objeto dentro del bucket (ej. clips/uid/mid/cid.mp4)
         Returns:
-            UploadUrlResult con presigned_url, public_url y expires_in
+            URL firmada para GET directo desde el cliente
         """
         ...

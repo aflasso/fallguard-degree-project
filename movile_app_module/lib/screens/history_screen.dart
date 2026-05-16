@@ -17,9 +17,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   static const List<String> _filters = [
     'Todos',
+    'Sin confirmar',
     'Confirmadas',
-    'Descartadas',
-    'Últimas 30 días',
+    'Falsas alarmas',
   ];
 
   static const List<String> _months = [
@@ -34,17 +34,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   List<AlertModel> _applyFilter(List<AlertModel> alerts) {
-    final now = DateTime.now();
     switch (_selectedFilter) {
       case 1:
-        return alerts.where((a) => a.status == AlertStatus.confirmed).toList();
+        return alerts.where((a) => a.status == AlertStatus.detected).toList();
       case 2:
-        return alerts.where((a) => a.status == AlertStatus.dismissed).toList();
+        return alerts.where((a) => a.status == AlertStatus.confirmed).toList();
       case 3:
-        return alerts
-            .where((a) => a.timestamp
-                .isAfter(now.subtract(const Duration(days: 30))))
-            .toList();
+        return alerts.where((a) => a.status == AlertStatus.falseAlarm).toList();
       default:
         return alerts;
     }

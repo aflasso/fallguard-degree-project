@@ -94,12 +94,13 @@ async def startup():
 
     # ── REST handler ──────────────────────────────────────────────────────
     RestHandler(
-        module_repository=  module_repo,
-        alert_repository=   alert_repo,
-        user_repository=    user_repo,
-        link_module=        link_module,
-        connection_manager= connection_manager,
-        generate_upload_url= generate_upload_url,
+        module_repository=    module_repo,
+        alert_repository=     alert_repo,
+        user_repository=      user_repo,
+        link_module=          link_module,
+        connection_manager=   connection_manager,
+        generate_upload_url=  generate_upload_url,
+        upload_url_generator= upload_url_generator,
     )
 
     app.include_router(router)
