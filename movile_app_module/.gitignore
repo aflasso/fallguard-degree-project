@@ -6,6 +6,7 @@
 build/
 # pubspec.lock NO se ignora en apps — garantiza builds reproducibles entre
 # colaboradores. Solo se ignora en paquetes/librerías publicados en pub.dev.
+.venv/
 
 # ── Android ───────────────────────────────────────────────────────────────────
 android/.gradle/

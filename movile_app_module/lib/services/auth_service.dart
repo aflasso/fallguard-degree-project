@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'alert_service.dart';
+import 'api_client.dart';
 
 class RegisterResult {
   final String? error;
@@ -123,6 +124,100 @@ class AuthService {
     // En web, google_sign_in requiere clientId en index.html — se omite
     if (!kIsWeb) await _googleSignIn.signOut();
     await _auth.signOut();
+  }
+
+  // Actualiza el displayName del usuario actual.
+  static Future<String?> updateDisplayName(String name) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return 'No hay sesión activa';
+      await user.updateDisplayName(name.trim());
+      await user.reload();
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _errorMessage(e.code);
+    } catch (_) {
+      return 'No se pudo actualizar el perfil';
+    }
+  }
+
+  // Indica si la cuenta usa autenticación por contraseña (no Google OAuth).
+  static bool isPasswordProvider() {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    return user.providerData.any((p) => p.providerId == 'password');
+  }
+
+  // Lista los providers asociados al usuario actual (e.g. 'password', 'google.com').
+  static List<String> currentProviders() {
+    final user = _auth.currentUser;
+    if (user == null) return const [];
+    return user.providerData.map((p) => p.providerId).toList();
+  }
+
+  // Cambia la contraseña: reautentica en el cliente con Firebase Auth para
+  // verificar la contraseña actual, luego delega el cambio al servidor que
+  // usa Firebase Admin SDK.
+  static Future<String?> updatePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null || user.email == null) return 'No hay sesión activa';
+    if (!isPasswordProvider()) {
+      return 'Esta cuenta usa Google y no permite cambiar contraseña';
+    }
+    if (newPassword.length < 6) {
+      return 'La contraseña debe tener al menos 6 caracteres';
+    }
+
+    try {
+      final credential = EmailAuthProvider.credential(
+        email: user.email!,
+        password: currentPassword,
+      );
+      await user.reauthenticateWithCredential(credential);
+    } on FirebaseAuthException catch (e) {
+      return _errorMessage(e.code);
+    }
+
+    try {
+      final res = await ApiClient.postJson(
+        '/api/auth/change-password',
+        body: {'new_password': newPassword},
+      );
+      if (res.statusCode >= 200 && res.statusCode < 300) return null;
+      return ApiClient.extractError(
+        res,
+        'No se pudo actualizar la contraseña',
+      );
+    } catch (_) {
+      return 'Error de conexión con el servidor';
+    }
+  }
+
+  // Solicita al servidor el envío de correo de restablecimiento.
+  static Future<String?> sendPasswordResetEmail() async {
+    final email = _auth.currentUser?.email;
+    if (email == null) return 'No hay correo asociado a esta cuenta';
+    if (!isPasswordProvider()) {
+      return 'Esta cuenta usa Google. No puedes restablecer la contraseña';
+    }
+
+    try {
+      final res = await ApiClient.postJson(
+        '/api/auth/reset-password',
+        body: {'email': email},
+        requireAuth: false,
+      );
+      if (res.statusCode >= 200 && res.statusCode < 300) return null;
+      return ApiClient.extractError(
+        res,
+        'No se pudo enviar el correo de restablecimiento',
+      );
+    } catch (_) {
+      return 'Error de conexión con el servidor';
+    }
   }
 
   static String _errorMessage(String code) {
