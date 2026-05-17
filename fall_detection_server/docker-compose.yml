@@ -14,4 +14,5 @@ services:
 
 networks:
   fallguard:
-    driver: bridge         # el servidor crea la red; el módulo se une con external: true
+    name: fallguard        # nombre exacto — evita el prefijo del proyecto
+    driver: bridge

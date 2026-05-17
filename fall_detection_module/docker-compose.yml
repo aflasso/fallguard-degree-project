@@ -4,7 +4,7 @@ services:
   module-1:
     build: .
     container_name: fg-module-1
-    restart: always
+    restart: no
     ipc: host
     env_file: docker.env
     environment:
@@ -28,7 +28,7 @@ services:
   module-2:
     build: .
     container_name: fg-module-2
-    restart: always
+    restart: no
     ipc: host
     env_file: docker.env
     environment:
