@@ -73,6 +73,17 @@ class AlertService {
     }
   }
 
+  static Future<void> renameModule(String moduleId, String displayName) async {
+    final res = await http.patch(
+      Uri.parse('$_baseUrl/api/modules/$moduleId/name'),
+      headers: await _headers(),
+      body: jsonEncode({'display_name': displayName}),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('renameModule failed: ${res.statusCode} ${res.body}');
+    }
+  }
+
   static Future<void> updateFcmToken(String token) async {
     final res = await http.patch(
       Uri.parse('$_baseUrl/api/users/$_uid/fcm-token'),

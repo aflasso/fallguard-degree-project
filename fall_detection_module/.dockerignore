@@ -1,0 +1,15 @@
+venv/
+.env
+docker.env
+data/
+models/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.git/
+.gitignore
+CLAUDE.md
+tests/

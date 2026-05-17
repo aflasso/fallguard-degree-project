@@ -1,0 +1,58 @@
+services:
+
+  # ── Módulo 1 ────────────────────────────────────────────────────────────────
+  module-1:
+    build: .
+    container_name: fg-module-1
+    restart: always
+    ipc: host
+    env_file: docker.env
+    environment:
+      CAMERA_SOURCE: /app/tests/videos/Office/Fall/video (1).avi
+      DEVICE: cuda:0
+    volumes:
+      - module1_data:/app/data
+      - ./models:/app/models:ro
+      - ./tests/videos:/app/tests/videos:ro
+    networks:
+      - fallguard
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ── Módulo 2 ────────────────────────────────────────────────────────────────
+  module-2:
+    build: .
+    container_name: fg-module-2
+    restart: always
+    ipc: host
+    env_file: docker.env
+    environment:
+      CAMERA_SOURCE: /app/tests/videos/Lecture_room/Fall/video (1).avi
+      DEVICE: cuda:0
+    volumes:
+      - module2_data:/app/data
+      - ./models:/app/models:ro
+      - ./tests/videos:/app/tests/videos:ro
+    networks:
+      - fallguard
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+# Para resetear la identidad de un módulo: docker compose down -v
+volumes:
+  module1_data:
+  module2_data:
+
+networks:
+  fallguard:
+    external: true

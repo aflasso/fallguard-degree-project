@@ -1,5 +1,6 @@
 # ── Entorno / Secretos ────────────────────────────────────────────────────────
 .env
+docker.env
 
 # ── Modelos ML (archivos grandes — distribuir por separado) ──────────────────
 yolo11x-pose.pt

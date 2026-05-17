@@ -146,8 +146,52 @@ class _LinkedCamerasScreenState extends State<LinkedCamerasScreen> {
     );
   }
 
+  Future<void> _renameModule(String moduleId, String? currentName) async {
+    final controller = TextEditingController(text: currentName ?? '');
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          'Nombre del módulo',
+          style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Nombre visible',
+            hintText: 'Ej: Sala principal',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    if (newName == null || !mounted) return;
+    try {
+      await AlertService.renameModule(moduleId, newName);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo actualizar el nombre'),
+          backgroundColor: AppTheme.alertRed,
+        ),
+      );
+    }
+  }
+
   Widget _moduleTile(Map<String, dynamic> data) {
     final moduleId = data['module_id'] as String? ?? 'desconocido';
+    final displayName = data['display_name'] as String?;
     final status = data['status'] as String? ?? 'disconnected';
     final cameras = (data['cameras'] as List?) ?? [];
     final isConnected = status == 'connected';
@@ -187,7 +231,7 @@ class _LinkedCamerasScreenState extends State<LinkedCamerasScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  moduleId,
+                  displayName ?? moduleId,
                   style: GoogleFonts.manrope(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
@@ -196,7 +240,9 @@ class _LinkedCamerasScreenState extends State<LinkedCamerasScreen> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${cameras.length} cámara${cameras.length == 1 ? '' : 's'}',
+                  displayName != null
+                      ? '${cameras.length} cámara${cameras.length == 1 ? '' : 's'} · $moduleId'
+                      : '${cameras.length} cámara${cameras.length == 1 ? '' : 's'}',
                   style: GoogleFonts.manrope(
                     fontSize: 12,
                     color: AppTheme.textSecondary,
@@ -204,6 +250,11 @@ class _LinkedCamerasScreenState extends State<LinkedCamerasScreen> {
                 ),
               ],
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit_outlined,
+                color: AppTheme.iconLight, size: 20),
+            onPressed: () => _renameModule(moduleId, displayName),
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

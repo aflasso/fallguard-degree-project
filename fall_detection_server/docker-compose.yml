@@ -1,0 +1,17 @@
+services:
+
+  fall-detection-server:
+    build: .
+    container_name: fall-detection-server
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8000:8000"        # expuesto al host para la app móvil (REST) y desarrollo
+    volumes:
+      - ./credentials:/app/credentials:ro   # serviceAccountKey.json — nunca en la imagen
+    networks:
+      - fallguard
+
+networks:
+  fallguard:
+    driver: bridge         # el servidor crea la red; el módulo se une con external: true
