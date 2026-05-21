@@ -269,6 +269,8 @@ El archivo `credentials/serviceAccountKey.json` se obtiene desde Firebase Consol
 
 ## Cómo correr el servidor
 
+### Sin Docker (desarrollo local)
+
 ```bash
 cd fall_detection_server
 python -m venv venv
@@ -276,9 +278,42 @@ venv\Scripts\activate          # Windows
 pip install -e ".[dev]"
 cp .env.template .env          # completar variables
 python main.py
-# o en producción:
-uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+
+### Con Docker
+
+```bash
+cd fall_detection_server
+docker compose build            # primera vez o tras cambios de código
+docker compose up -d            # arranca en background y crea la red fallguard
+docker compose logs -f          # ver logs
+```
+
+**El servidor debe arrancar antes que los módulos** — su compose crea la red Docker `fallguard` que los módulos necesitan para conectarse.
+
+---
+
+## Docker — detalles de implementación
+
+### Archivos
+
+| Archivo | Descripción |
+|---|---|
+| `Dockerfile` | `python:3.11-slim` + dependencias via `pyproject.toml`, sin reload |
+| `.dockerignore` | Excluye `venv/`, `.env`, `credentials/`, `tests/` del build context |
+| `docker-compose.yml` | Servicio `fall-detection-server`, puerto 8000, red `fallguard`, credentials montadas |
+
+### Red Docker (fallguard)
+
+El compose del servidor define la red con `name: fallguard` y `driver: bridge` — Docker la crea con ese nombre exacto al hacer `docker compose up`. Los módulos se unen a ella con `external: true`. Sin el prefijo `name:`, Docker la crearía como `fall_detection_server_fallguard` y los módulos no la encontrarían.
+
+### Credenciales Firebase
+
+`credentials/serviceAccountKey.json` se monta como volumen read-only (`./credentials:/app/credentials:ro`) — nunca se hornea en la imagen. Esto permite usar la misma imagen en distintos entornos con distintas credenciales.
+
+### CMD vs python main.py
+
+El Dockerfile usa `CMD ["uvicorn", "main:app", ...]` directamente en lugar de `python main.py` para evitar el `reload=True` que tiene el entry point local. En un contenedor el file watching no tiene sentido y genera overhead innecesario.
 
 ---
 
@@ -290,6 +325,9 @@ fall_detection_server/
 ├── config.py                        ← variables de entorno con defaults
 ├── pyproject.toml                   ← dependencias y configuración del paquete
 ├── .env / .env.template
+├── Dockerfile                       ← imagen Docker del servidor
+├── .dockerignore
+├── docker-compose.yml               ← servicio + red fallguard
 ├── credentials/
 │   └── serviceAccountKey.json       ← ignorado por git, credenciales Firebase
 │

@@ -195,6 +195,8 @@ El `MODULE_ID` se genera automáticamente en el primer arranque y se persiste en
 
 ## Cómo correr el módulo
 
+### Sin Docker (desarrollo local)
+
 ```bash
 cd fall_detection_module
 python -m venv venv
@@ -203,6 +205,64 @@ pip install -e ".[dev]"
 cp .env.template .env          # completar variables
 python main.py
 ```
+
+### Con Docker
+
+```bash
+cd fall_detection_module
+cp docker.env.template docker.env   # completar MODULE_API_KEY
+docker compose build                # primera vez o tras cambios de código
+docker compose up                   # arranca module-1 y module-2
+```
+
+**Prerequisito:** el servidor debe estar corriendo primero (crea la red `fallguard`).
+
+Para ver el `module_id` generado por cada contenedor (necesario para vincularlo desde la app):
+```bash
+docker compose logs module-1 | grep module_id
+```
+
+Para resetear la identidad de un módulo (genera nuevo UUID en el próximo arranque):
+```bash
+docker compose down -v
+```
+
+---
+
+## Docker — detalles de implementación
+
+### Archivos
+
+| Archivo | Descripción |
+|---|---|
+| `Dockerfile` | `python:3.11-slim` + ffmpeg + dependencias via `pyproject.toml` |
+| `.dockerignore` | Excluye `venv/`, `data/`, `models/`, `tests/` del build context |
+| `docker-compose.yml` | Dos servicios (`module-1`, `module-2`) con GPU y red `fallguard` |
+| `docker.env` / `docker.env.template` | Variables para Docker — apunta al servidor por nombre de contenedor |
+| `entrypoint.sh` | Convierte `.avi` → `.mp4` lossless antes de lanzar `main.py` |
+
+### Por qué dos archivos de entorno (.env vs docker.env)
+
+- `.env` — modo nativo (`python main.py`): `SERVER_WS_URL=ws://localhost:8000/ws`
+- `docker.env` — modo Docker: `SERVER_WS_URL=ws://fall-detection-server:8000/ws`
+
+Permiten cambiar de modo sin editar URLs manualmente.
+
+### Por qué el entrypoint convierte el video
+
+`opencv-python-headless` no puede decodificar todos los codecs `.avi` (ej: DIVX del dataset LE2I). El `ffmpeg` del sistema sí puede. El entrypoint convierte a H.264 lossless (`-crf 0`) antes de arrancar, preservando calidad para que YOLO detecte correctamente.
+
+### Identidad del módulo en Docker
+
+Cada servicio tiene su propio volumen nombrado (`module1_data`, `module2_data`) que persiste `data/module_id.txt`. Al primer arranque se genera un UUID único por contenedor; en reinicios se reutiliza el mismo ID.
+
+### Red Docker (fallguard)
+
+Red bridge compartida entre el servidor y los módulos. El servidor la crea (`name: fallguard, driver: bridge`); los módulos se unen (`external: true`). Los módulos alcanzan al servidor por nombre de contenedor: `fall-detection-server:8000`.
+
+### GPU (Blackwell / RTX 50xx)
+
+La RTX 5060 (sm_120) requiere PyTorch nightly con CUDA 12.x — los wheels estables solo soportan hasta sm_90. El Dockerfile instala `--pre torch torchvision --index-url .../nightly/cu130`. Cada servicio reserva la GPU via `deploy.resources.reservations.devices`.
 
 ---
 
@@ -213,7 +273,12 @@ fall_detection_module/
 ├── main.py                          ← orquesta los 3 threads, wiring de dependencias
 ├── config.py                        ← variables de entorno, MODULE_ID persistido
 ├── pyproject.toml
-├── .env / .env.template
+├── .env / .env.template             ← configuración para modo nativo
+├── Dockerfile                       ← imagen Docker del módulo
+├── .dockerignore
+├── docker-compose.yml               ← module-1 y module-2 con GPU y red fallguard
+├── docker.env / docker.env.template ← configuración para modo Docker
+├── entrypoint.sh                    ← conversión de video .avi → .mp4 antes de main.py
 ├── data/
 │   ├── module_id.txt                ← UUID del módulo (generado en primer arranque)
 │   ├── clips/                       ← clips grabados localmente
@@ -276,3 +341,9 @@ El módulo debe tener el mismo ID entre reinicios para que el servidor lo recono
 
 **¿Por qué buffer circular para el clip?**
 El evento de caída se confirma con cierto delay (lógica de ventana). El buffer circular captura los frames previos al evento para que el clip incluya el contexto antes de la caída, no solo la caída ya ocurrida.
+
+**¿Por qué instalar dependencias desde `pyproject.toml` en Docker y no listarlas manualmente?**
+Listar paquetes manualmente en el Dockerfile puede resolver versiones distintas a las del entorno local, causando diferencias en keypoints de YOLO/LSTM que rompen la detección. `pip install -e .` garantiza la misma combinación de versiones que funciona fuera de Docker. PyTorch CUDA se pre-instala antes para que pip lo vea como ya satisfecho.
+
+**¿Por qué `restart: no` en los módulos Docker?**
+En modo test el video termina y el módulo sale limpiamente (exit 0). Con `restart: always` se reiniciaría en bucle automáticamente; con `restart: no` el operador controla cuándo volver a correr.
