@@ -49,7 +49,10 @@ class FirestoreModuleRepository(FirestoreRepository[Module], ModuleRepository):
             module_id=    data["module_id"],
             status=       ModuleStatus(data["status"]),
             last_seen=    data.get("last_seen"),
-            user_id=      data.get("user_id"),
+            # Normaliza "" / valores falsy a None — un módulo solo está vinculado
+            # si tiene un user_id real. Esto mantiene consistente el chequeo
+            # `user_id is None` en todo el servidor (link, upload, connected).
+            user_id=      data.get("user_id") or None,
             cameras=      [CameraInfo(id=c["id"], name=c["name"]) for c in data.get("cameras", [])],
             display_name= data.get("display_name"),
         )

@@ -1,4 +1,4 @@
-"""
+r"""
 Inferencia en tiempo real para detección de caídas.
 
 Pipeline por frame:
@@ -17,7 +17,7 @@ Uso:
   python realtime_inference_yolo.py `
       --model_path  "lstm_data/fall_lstm_final.pt" `
       --yolo_path   "./yolo11x-pose.pt" `
-      --source     0 `
+      --source     "C:\Users\andre\Desarrollo\Proyects\universidad\Proyecto de grado\Sistema\Modelo\LSTM\Data\Le2i\Office\Fall\video (1).avi" `
       --conf       0.8 `
       --conf_lstm  0.7 `
       --min_frames 3 `

@@ -34,6 +34,11 @@ class LinkModuleSchema(BaseModel):
     user_id:   str
 
 
+class UnlinkModuleSchema(BaseModel):
+    module_id: str
+    user_id:   str
+
+
 class ModuleStatusSchema(BaseModel):
     module_id:    str
     status:       str

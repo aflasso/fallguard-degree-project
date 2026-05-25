@@ -21,6 +21,7 @@ from infrastructure.websocket.connection_manager import WebSocketConnectionManag
 from application.use_cases.connect_module import ConnectModule
 from application.use_cases.handle_fall_alert import HandleFallAlert
 from application.use_cases.link_module import LinkModule
+from application.use_cases.unlink_module import UnlinkModule
 from application.use_cases.generate_upload_url import GenerateUploadUrl
 from api.websocket import WebSocketHandler
 from api.rest import RestHandler, router
@@ -72,8 +73,13 @@ async def startup():
         notification_sender= notification_sender,
     )
     link_module = LinkModule(
-        module_repository= module_repo,
-        user_repository=   user_repo,
+        module_repository=  module_repo,
+        user_repository=    user_repo,
+        connection_manager= connection_manager,
+    )
+    unlink_module = UnlinkModule(
+        module_repository=  module_repo,
+        connection_manager= connection_manager,
     )
     generate_upload_url = GenerateUploadUrl(
         module_repository=    module_repo,
@@ -98,6 +104,7 @@ async def startup():
         alert_repository=     alert_repo,
         user_repository=      user_repo,
         link_module=          link_module,
+        unlink_module=        unlink_module,
         connection_manager=   connection_manager,
         generate_upload_url=  generate_upload_url,
         upload_url_generator= upload_url_generator,

@@ -7,6 +7,7 @@ import logging
 
 from domain.repositories.module_repository import ModuleRepository
 from domain.repositories.user_repository import UserRepository
+from application.ports.connection_manager import ConnectionManager
 from application.dtos.module_dtos import LinkModuleCommand
 
 logger = logging.getLogger(__name__)
@@ -16,11 +17,13 @@ class LinkModule:
 
     def __init__(
         self,
-        module_repository: ModuleRepository,
-        user_repository:   UserRepository,
+        module_repository:  ModuleRepository,
+        user_repository:    UserRepository,
+        connection_manager: ConnectionManager,
     ):
-        self._module_repo = module_repository
-        self._user_repo   = user_repository
+        self._module_repo        = module_repository
+        self._user_repo          = user_repository
+        self._connection_manager = connection_manager
 
     async def execute(self, command: LinkModuleCommand) -> None:
         """
@@ -44,3 +47,6 @@ class LinkModule:
         await self._module_repo.save(module)
 
         logger.info(f"Módulo {command.module_id} vinculado a usuario {command.user_id}")
+
+        # Avisar al módulo en caliente para que arranque la detección si está conectado
+        await self._connection_manager.send(command.module_id, {"type": "module_linked"})

@@ -48,10 +48,36 @@ services:
               count: 1
               capabilities: [gpu]
 
+  # ── Módulo 3 ────────────────────────────────────────────────────────────────
+  module-3:
+    build: .
+    container_name: fg-module-3
+    restart: no
+    ipc: host
+    env_file: docker.env
+    environment:
+      CAMERA_SOURCE: /app/tests/videos/Lecture_room/NFall/video (18).avi
+      DEVICE: cuda:0
+    volumes:
+      - module3_data:/app/data
+      - ./models:/app/models:ro
+      - ./tests/videos:/app/tests/videos:ro
+    networks:
+      - fallguard
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+
 # Para resetear la identidad de un módulo: docker compose down -v
 volumes:
   module1_data:
   module2_data:
+  module3_data:
 
 networks:
   fallguard:

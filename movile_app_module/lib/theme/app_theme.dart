@@ -15,6 +15,10 @@ class AppTheme {
   static const Color alertRed = Color(0xFFD32F2F);
   static const Color alertRedLight = Color(0xFFFFF0F0);
 
+  // Warning colors (módulo desconectado, avisos no críticos)
+  static const Color warning = Color(0xFFE8A317);
+  static const Color warningLight = Color(0xFFFFF6E5);
+
   // Text colors
   static const Color textPrimary = Color(0xFF111827);
   static const Color textSecondary = Color(0xFF6B7280);

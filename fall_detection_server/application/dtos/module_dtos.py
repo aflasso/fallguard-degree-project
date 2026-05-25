@@ -25,3 +25,10 @@ class LinkModuleCommand:
     """Comando para vincular un módulo a un usuario."""
     module_id: str
     user_id:   str
+
+
+@dataclass
+class UnlinkModuleCommand:
+    """Comando para desvincular un módulo de su usuario."""
+    module_id: str
+    user_id:   str

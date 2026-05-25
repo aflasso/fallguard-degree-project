@@ -6,6 +6,7 @@ Módulo local que corre en un PC en el hogar. Captura video desde una cámara, d
 
 Sus responsabilidades son:
 - Capturar video desde cámara física o archivo (modo test)
+- **No detectar mientras el módulo no esté vinculado a un usuario** (el servidor es la fuente de verdad)
 - Extraer keypoints de pose con YOLO11x-pose (pretrained, sin fine-tuning)
 - Clasificar secuencias temporales con LSTM (Normal / Cayendo / Post-caída)
 - Confirmar eventos de caída con lógica de ventana deslizante
@@ -130,6 +131,20 @@ El módulo se conecta a `ws://<host>/ws?api_key=<MODULE_API_KEY>`.
 
 ---
 
+## Vinculación a usuario (gate de detección)
+
+El módulo **no procesa video ni envía alertas hasta estar vinculado a un usuario**. El servidor es la fuente de verdad; el módulo nunca decide su estado por sí mismo.
+
+- Solo se bloquea el **Thread 1 (detección)** mediante un `threading.Event` (`linked_event`). Los Threads 2 (uploader) y 3 (WebSocket) siguen activos — el Thread 3 *debe* correr para enterarse de la vinculación.
+- El servidor informa el estado en el mensaje `connected` (`linked: true/false`) y lo cambia en caliente con `module_linked` / `module_unlinked`. El callback `on_link_status` en `main.py` marca/limpia `linked_event`.
+- Mientras espera, el Thread 1 imprime logs informativos con el `module_id` (al entrar en espera, recordatorio cada 60 s, y al arrancar la detección).
+
+### Persistencia del estado
+
+El estado se persiste en `data/linked_state.txt` (`1`/`0`). Al arrancar se restaura como valor inicial del `linked_event`, de modo que un módulo ya vinculado **siga detectando tras un reinicio offline**. El estado **no se limpia al desconectarse** — solo el servidor lo cambia de forma explícita. Al reconectar, `connected` re-afirma el estado real; si te desvincularon estando offline, se corrige ahí. Cualquier clip generado en esa ventana no se sube: `GenerateUploadUrl` (servidor) exige módulo vinculado y la alerta queda en la cola local.
+
+---
+
 ## Protocolo WebSocket
 
 ### Módulo → Servidor
@@ -151,7 +166,14 @@ El módulo se conecta a `ws://<host>/ws?api_key=<MODULE_API_KEY>`.
 ### Servidor → Módulo
 
 ```jsonc
-{ "type": "connected", "module_id": "uuid" }
+// Confirmación de conexión — incluye si el módulo ya está vinculado a un usuario
+{ "type": "connected", "module_id": "uuid", "linked": true }
+
+// El usuario vinculó el módulo en caliente → habilitar detección
+{ "type": "module_linked" }
+
+// El usuario desvinculó el módulo en caliente → pausar detección
+{ "type": "module_unlinked" }
 
 { "type": "upload_url", "clip_id": "uuid-clip",
   "presigned_url": "https://storage.googleapis.com/...",
@@ -190,6 +212,8 @@ Variables de entorno (ver `.env.template`):
 | `LOG_LEVEL` | `INFO` | Nivel de logging |
 
 El `MODULE_ID` se genera automáticamente en el primer arranque y se persiste en `data/module_id.txt`.
+
+El estado de vinculación se persiste en `data/linked_state.txt` (configurable con `LINKED_STATE_PATH`). Es estado autogestionado por el módulo a partir de lo que reporta el servidor — no se configura manualmente.
 
 ---
 
@@ -281,6 +305,7 @@ fall_detection_module/
 ├── entrypoint.sh                    ← conversión de video .avi → .mp4 antes de main.py
 ├── data/
 │   ├── module_id.txt                ← UUID del módulo (generado en primer arranque)
+│   ├── linked_state.txt             ← estado de vinculación persistido (1/0)
 │   ├── clips/                       ← clips grabados localmente
 │   └── pending_alerts.json          ← cola local de alertas sin enviar
 ├── models/
@@ -344,6 +369,12 @@ El evento de caída se confirma con cierto delay (lógica de ventana). El buffer
 
 **¿Por qué instalar dependencias desde `pyproject.toml` en Docker y no listarlas manualmente?**
 Listar paquetes manualmente en el Dockerfile puede resolver versiones distintas a las del entorno local, causando diferencias en keypoints de YOLO/LSTM que rompen la detección. `pip install -e .` garantiza la misma combinación de versiones que funciona fuera de Docker. PyTorch CUDA se pre-instala antes para que pip lo vea como ya satisfecho.
+
+**¿Por qué solo se bloquea el Thread 1 con `linked_event` y no todos los threads?**
+El Thread 3 (WebSocket) debe seguir corriendo para recibir el mensaje que indica que el módulo fue vinculado — bloquearlo causaría un deadlock (nunca se enteraría). El Thread 2 (uploader) corre ocioso porque sin detección no llegan clips. Solo la detección (cara, con YOLO+LSTM) se pausa.
+
+**¿Por qué el estado de vinculación no se limpia al desconectarse?**
+Un módulo ya vinculado que pierde conexión debe seguir detectando y encolar alertas offline. Si se limpiara al desconectar, una caída de red apagaría la detección. El estado solo cambia cuando el servidor lo dice explícitamente (`connected` / `module_linked` / `module_unlinked`), y se persiste en disco para sobrevivir reinicios offline.
 
 **¿Por qué `restart: no` en los módulos Docker?**
 En modo test el video termina y el módulo sale limpiamente (exit 0). Con `restart: always` se reiniciaría en bucle automáticamente; con `restart: no` el operador controla cuándo volver a correr.

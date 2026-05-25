@@ -12,6 +12,7 @@ from firebase_admin import auth as firebase_auth
 from api.auth import verify_token, require_same_user
 from api.schemas import (
     LinkModuleSchema,
+    UnlinkModuleSchema,
     ModuleStatusSchema,
     AlertResponseSchema,
     CreateUserSchema,
@@ -23,9 +24,10 @@ from api.schemas import (
 )
 from api.schemas.alert_schemas import RequestUploadUrlSchema, UpdateAlertStatusSchema
 from application.dtos.alert_dtos import GenerateUploadUrlCommand
-from application.dtos.module_dtos import LinkModuleCommand
+from application.dtos.module_dtos import LinkModuleCommand, UnlinkModuleCommand
 from application.use_cases.generate_upload_url import GenerateUploadUrl
 from application.use_cases.link_module import LinkModule
+from application.use_cases.unlink_module import UnlinkModule
 from application.ports.upload_url_generator import UploadUrlGenerator
 from domain.entities import AlertStatus
 import config
@@ -50,6 +52,7 @@ class RestHandler:
         alert_repository:     AlertRepository,
         user_repository:      UserRepository,
         link_module:          LinkModule,
+        unlink_module:        UnlinkModule,
         connection_manager:   WebSocketConnectionManager,
         generate_upload_url:  GenerateUploadUrl,
         upload_url_generator: UploadUrlGenerator,
@@ -58,12 +61,14 @@ class RestHandler:
         self._alert_repo           = alert_repository
         self._user_repo            = user_repository
         self._link_module          = link_module
+        self._unlink_module        = unlink_module
         self._connection_mgr       = connection_manager
         self._generate_upload_url  = generate_upload_url
         self._upload_url_generator = upload_url_generator
 
         # Registrar rutas
         router.post("/modules/link")(self.link_module)
+        router.post("/modules/unlink")(self.unlink_module)
         router.get("/modules/status/{module_id}")(self.module_status)
         router.get("/alerts")(self.get_alerts)
         router.post("/users")(self.create_user)
@@ -91,6 +96,25 @@ class RestHandler:
             )
             await self._link_module.execute(command)
             return {"message": "Módulo vinculado correctamente"}
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    async def unlink_module(
+        self,
+        body:  UnlinkModuleSchema,
+        token: dict = Depends(verify_token),
+    ) -> dict:
+        """Desvincula un módulo de su usuario."""
+        require_same_user(token["uid"], body.user_id)
+        try:
+            command = UnlinkModuleCommand(
+                module_id= body.module_id,
+                user_id=   body.user_id,
+            )
+            await self._unlink_module.execute(command)
+            return {"message": "Módulo desvinculado correctamente"}
         except PermissionError as e:
             raise HTTPException(status_code=403, detail=str(e))
         except ValueError as e:

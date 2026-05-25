@@ -12,6 +12,7 @@ import queue
 import signal
 import sys
 import threading
+import time
 
 import config
 from domain.fall_service import FallDetectionService
@@ -43,6 +44,12 @@ alert_queue = queue.Queue()   # Thread 2 → Thread 3: Alert
 # ── Stop event global ─────────────────────────────────────────────────────────
 stop_event = threading.Event()
 
+# ── Linked event global ───────────────────────────────────────────────────────
+# La detección solo corre cuando el módulo está vinculado a un usuario.
+# El servidor es la fuente de verdad: marca/limpia este evento via WebSocket
+# (mensaje 'connected' con flag 'linked', y 'module_linked' / 'module_unlinked').
+linked_event = threading.Event()
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Thread 1 — Detección
@@ -51,7 +58,37 @@ def detection_thread(detect_fall, clip_recorder, active_cam):
     logger.info("Thread 1 iniciado")
     detect_fall.reset()
 
+    REMINDER_INTERVAL = 30   # segundos entre recordatorios mientras espera vinculación
+    waiting       = False
+    last_reminder = 0.0
+
     while not stop_event.is_set():
+        # ── Gate: no detectar si el módulo no está vinculado a un usuario ──
+        if not linked_event.is_set():
+            now = time.monotonic()
+            if not waiting:
+                logger.info(
+                    f"Módulo no vinculado a ningún usuario — detección en espera "
+                    f"hasta que se vincule | module_id={config.MODULE_ID}"
+                )
+                waiting       = True
+                last_reminder = now
+            elif now - last_reminder >= REMINDER_INTERVAL:
+                logger.info(
+                    f"Esperando vinculación a un usuario para iniciar la detección "
+                    f"| module_id={config.MODULE_ID}"
+                )
+                last_reminder = now
+            linked_event.wait(timeout=5.0)   # re-chequea stop_event periódicamente
+            continue
+
+        if waiting:
+            logger.info(
+                f"Módulo vinculado — iniciando detección | module_id={config.MODULE_ID}"
+            )
+            detect_fall.reset()   # ventana deslizante limpia al arrancar
+            waiting = False
+
         frame = active_cam.instance.read()
         if frame is None:
             logger.info("Video terminado — deteniendo módulo")
@@ -125,6 +162,15 @@ def websocket_thread(
 # ──────────────────────────────────────────────────────────────────────────────
 def main():
     logger.info(f"Iniciando módulo | module_id={config.MODULE_ID}")
+
+    # ── Restaurar estado de vinculación persistido ────────────────────────
+    # Permite que un módulo ya vinculado siga detectando tras un reinicio offline.
+    # El servidor lo re-afirma al reconectar (mensaje 'connected').
+    if config.load_linked_state():
+        linked_event.set()
+        logger.info(f"Estado de vinculación restaurado: VINCULADO | module_id={config.MODULE_ID}")
+    else:
+        logger.info(f"Estado de vinculación: NO vinculado | module_id={config.MODULE_ID}")
 
     # ── Gestión de cámara ─────────────────────────────────────────────────
     source = config.get_camera_source()
@@ -201,6 +247,27 @@ def main():
         logger.info(f"Configuración actualizada: {config_data}")
         # Por ahora solo log — requiere reinicio para aplicar
 
+    def on_link_status(linked: bool):
+        # El servidor reporta el estado de vinculación: habilita o pausa la detección.
+        # No se limpia al desconectarse — un módulo ya vinculado debe seguir detectando
+        # offline; solo el servidor cambia este estado de forma explícita.
+        if linked:
+            if not linked_event.is_set():
+                logger.info(
+                    f"Servidor reporta módulo VINCULADO — detección habilitada "
+                    f"| module_id={config.MODULE_ID}"
+                )
+                config.save_linked_state(True)
+            linked_event.set()
+        else:
+            if linked_event.is_set():
+                logger.info(
+                    f"Servidor reporta módulo NO vinculado — detección pausada "
+                    f"| module_id={config.MODULE_ID}"
+                )
+                config.save_linked_state(False)
+            linked_event.clear()
+
     # ── WebSocket ─────────────────────────────────────────────────────────
     ws_url = config.SERVER_WS_URL
     if config.MODULE_API_KEY:
@@ -212,6 +279,7 @@ def main():
         cameras=          cameras_dict,
         on_set_camera=    on_set_camera,
         on_config_update= on_config_update,
+        on_link_status=   on_link_status,
     )
 
     # Inyectar ws_client en send_alert via setter

@@ -85,7 +85,12 @@ El primer mensaje del módulo **debe** ser `module_connect`. El servidor cierra 
 ### Servidor → Módulo
 
 ```jsonc
-{ "type": "connected", "module_id": "uuid" }
+// 'linked' indica si el módulo ya está vinculado a un usuario.
+// El módulo no inicia la detección hasta estar vinculado.
+{ "type": "connected", "module_id": "uuid", "linked": true }
+
+{ "type": "module_linked" }     // vinculación en caliente → arrancar detección
+{ "type": "module_unlinked" }   // desvinculación en caliente → pausar detección
 
 { "type": "upload_url", "clip_id": "uuid-clip",
   "presigned_url": "https://storage.googleapis.com/...", "expires_in": 300 }

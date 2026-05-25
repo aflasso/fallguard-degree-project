@@ -24,18 +24,19 @@ class _HomeWrapperState extends State<HomeWrapper> {
     });
   }
 
-  static const List<Widget> _screens = [
-    DashboardScreen(),
-    HistoryScreen(),
-    SettingsScreen(),
-  ];
-
   @override
   Widget build(BuildContext context) {
+    final screens = [
+      DashboardScreen(
+        onSeeAllHistory: () => setState(() => _currentIndex = 1),
+      ),
+      const HistoryScreen(),
+      const SettingsScreen(),
+    ];
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: _screens,
+        children: screens,
       ),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(

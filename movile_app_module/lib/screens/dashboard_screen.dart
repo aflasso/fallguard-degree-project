@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
@@ -5,9 +6,494 @@ import '../services/auth_service.dart';
 import '../services/alert_service.dart';
 import '../models/alert_model.dart';
 import '../widgets/fallguard_app_bar.dart';
+import 'linked_cameras_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({super.key});
+  const DashboardScreen({super.key, this.onSeeAllHistory});
+
+  /// Cambia a la pestaña de Historial (provisto por HomeWrapper).
+  final VoidCallback? onSeeAllHistory;
+
+  /// Estado del header según (en orden de prioridad):
+  /// 1. alertas sin confirmar, 2. sin módulos vinculados,
+  /// 3. algún módulo vinculado desconectado, 4. todo en orden.
+  ({String label, Color accent, Color container, IconData icon}) _headerState({
+    required int pendingAlerts,
+    required bool hasModules,
+    required bool anyDisconnected,
+  }) {
+    if (pendingAlerts > 0) {
+      return (
+        label: pendingAlerts == 1
+            ? '1 alerta sin confirmar'
+            : '$pendingAlerts alertas sin confirmar',
+        accent: AppTheme.alertRed,
+        container: AppTheme.alertRedLight,
+        icon: Icons.priority_high_rounded,
+      );
+    }
+    if (!hasModules) {
+      return (
+        label: 'Sin módulos vinculados',
+        accent: AppTheme.textSecondary,
+        container: const Color(0xFFF1F3F5),
+        icon: Icons.link_off_rounded,
+      );
+    }
+    if (anyDisconnected) {
+      return (
+        label: 'Módulo desconectado',
+        accent: AppTheme.warning,
+        container: AppTheme.warningLight,
+        icon: Icons.wifi_off_rounded,
+      );
+    }
+    return (
+      label: 'Protección Activa',
+      accent: AppTheme.primary,
+      container: AppTheme.primaryContainer,
+      icon: Icons.check_rounded,
+    );
+  }
+
+  // ── Header (texto + nombre + avatar con badge de estado) ──────────────────
+  Widget _header(
+      ({String label, Color accent, Color container, IconData icon}) st) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                st.label,
+                style: GoogleFonts.manrope(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: st.accent,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                AuthService.currentUser?.displayName ?? 'Paciente',
+                style: GoogleFonts.manrope(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Stack(
+          children: [
+            Container(
+              width: 68,
+              height: 68,
+              decoration: BoxDecoration(
+                color: st.container,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: st.accent.withValues(alpha: 0.25),
+                  width: 2.5,
+                ),
+              ),
+              child: Icon(Icons.elderly, size: 36, color: st.accent),
+            ),
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: st.accent,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(st.icon, color: Colors.white, size: 12),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ── Tarjeta de estado dinámica (misma prioridad que el header) ────────────
+  Widget _statusCard(
+    BuildContext context, {
+    required List<AlertModel> pendingList,
+    required bool hasModules,
+    required List<Map<String, dynamic>> disconnected,
+  }) {
+    if (pendingList.isNotEmpty) return _alertsPreviewCard(context, pendingList);
+    if (!hasModules) return _noModulesCard(context);
+    if (disconnected.isNotEmpty) return _disconnectedCard(disconnected);
+    return _safeCard();
+  }
+
+  BoxDecoration _cardDecoration({Color? border}) => BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: border != null ? Border.all(color: border) : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      );
+
+  // Estado seguro — todo en orden
+  Widget _safeCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+      decoration: _cardDecoration(),
+      child: Column(
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: const BoxDecoration(
+              color: AppTheme.primary,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.check_circle_outline,
+                color: Colors.white, size: 32),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Estado: Seguro',
+            style: GoogleFonts.manrope(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.primary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Sin caídas detectadas hoy',
+            style: GoogleFonts.manrope(
+              fontSize: 13,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryContainer,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    color: AppTheme.primary,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Monitoreo en tiempo real activo',
+                  style: GoogleFonts.manrope(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Hay alertas sin confirmar — preview de acceso rápido
+  Widget _alertsPreviewCard(BuildContext context, List<AlertModel> pending) {
+    final preview = pending.take(3).toList();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: _cardDecoration(border: AppTheme.alertRedLight),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.notifications_active_rounded,
+                  color: AppTheme.alertRed, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Alertas por revisar',
+                style: GoogleFonts.manrope(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.alertRed,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${pending.length}',
+                  style: GoogleFonts.manrope(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ...preview.map((a) => _alertPreviewRow(context, a)),
+          if (pending.length > preview.length) ...[
+            const SizedBox(height: 6),
+            Text(
+              'y ${pending.length - preview.length} alerta(s) más por revisar',
+              style: GoogleFonts.manrope(
+                fontSize: 12,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _alertPreviewRow(BuildContext context, AlertModel a) {
+    final ts = a.timestamp;
+    final time =
+        '${ts.day}/${ts.month} · ${ts.hour}:${ts.minute.toString().padLeft(2, '0')}';
+    final subtitle = a.location.isNotEmpty ? '${a.location} · $time' : time;
+    return InkWell(
+      onTap: () => Navigator.pushNamed(
+        context,
+        '/emergency',
+        arguments: {
+          'alertId': a.id,
+          'timestamp': a.timestamp.toIso8601String(),
+          'status': a.status.name,
+        },
+      ),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: AppTheme.alertRedLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.warning_amber_rounded,
+                  color: AppTheme.alertRed, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Caída detectada',
+                    style: GoogleFonts.manrope(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.manrope(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: AppTheme.iconLight, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Hay módulos vinculados pero alguno desconectado
+  Widget _disconnectedCard(List<Map<String, dynamic>> disconnected) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: _cardDecoration(border: AppTheme.warningLight),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.wifi_off_rounded,
+                  color: AppTheme.warning, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                disconnected.length == 1
+                    ? 'Módulo desconectado'
+                    : 'Módulos desconectados',
+                style: GoogleFonts.manrope(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ...disconnected.map(_disconnectedModuleRow),
+        ],
+      ),
+    );
+  }
+
+  Widget _disconnectedModuleRow(Map<String, dynamic> data) {
+    final moduleId = data['module_id'] as String? ?? 'desconocido';
+    final displayName = data['display_name'] as String?;
+
+    final lastSeenRaw = data['last_seen'];
+    DateTime? lastSeen;
+    if (lastSeenRaw is Timestamp) {
+      lastSeen = lastSeenRaw.toDate();
+    } else if (lastSeenRaw is String) {
+      lastSeen = DateTime.tryParse(lastSeenRaw);
+    }
+    final String connInfo;
+    if (lastSeen != null) {
+      final l = lastSeen.toLocal();
+      connInfo =
+          'Última conexión: ${l.day}/${l.month}/${l.year} · ${l.hour}:${l.minute.toString().padLeft(2, '0')}';
+    } else {
+      connInfo = 'En espera · sin conexión previa';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppTheme.warningLight,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.videocam_off_outlined,
+                color: AppTheme.warning, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  displayName ?? moduleId,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.manrope(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                if (displayName != null)
+                  Text(
+                    moduleId,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.manrope(
+                      fontSize: 11,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                Text(
+                  connInfo,
+                  style: GoogleFonts.manrope(
+                    fontSize: 11,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // No hay módulos vinculados — invitación + acceso rápido
+  Widget _noModulesCard(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+      decoration: _cardDecoration(),
+      child: Column(
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: const BoxDecoration(
+              color: Color(0xFFF1F3F5),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.videocam_off_outlined,
+                color: AppTheme.textSecondary, size: 32),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Sin módulos vinculados',
+            style: GoogleFonts.manrope(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Vincula un módulo para empezar a monitorear caídas en tiempo real.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.manrope(
+              fontSize: 13,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const LinkedCamerasScreen()),
+            ),
+            icon: const Icon(Icons.add, size: 20),
+            label: const Text('Vincular módulo'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -21,158 +507,42 @@ class DashboardScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Patient Header ─────────────────────────────────────────
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Protección Activa',
-                        style: GoogleFonts.manrope(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        AuthService.currentUser?.displayName ?? 'Paciente',
-                        style: GoogleFonts.manrope(
-                          fontSize: 26,
-                          fontWeight: FontWeight.w800,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // Patient avatar
-                Stack(
-                  children: [
-                    Container(
-                      width: 68,
-                      height: 68,
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryContainer,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: AppTheme.primary.withValues(alpha: 0.25),
-                          width: 2.5,
-                        ),
-                      ),
-                      child: const Icon(
-                        Icons.elderly,
-                        size: 36,
-                        color: AppTheme.primary,
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 0,
-                      right: 0,
-                      child: Container(
-                        width: 22,
-                        height: 22,
-                        decoration: const BoxDecoration(
-                          color: AppTheme.primary,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.check,
-                          color: Colors.white,
-                          size: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // ── Status Card ────────────────────────────────────────────
-            Container(
-              width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(18),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 14,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  Container(
-                    width: 64,
-                    height: 64,
-                    decoration: const BoxDecoration(
-                      color: AppTheme.primary,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.check_circle_outline,
-                      color: Colors.white,
-                      size: 32,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Estado: Seguro',
-                    style: GoogleFonts.manrope(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Sin caídas detectadas hoy',
-                    style: GoogleFonts.manrope(
-                      fontSize: 13,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+            // ── Patient Header (estado dinámico) ───────────────────────
+            StreamBuilder<List<AlertModel>>(
+              stream: AlertService.alertsStream(),
+              builder: (context, alertSnap) {
+                final pendingList = (alertSnap.data ?? [])
+                    .where((a) => a.status == AlertStatus.detected)
+                    .toList();
+                return StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: AlertService.linkedModulesStream(),
+                  builder: (context, modSnap) {
+                    final modules = modSnap.data ?? [];
+                    final hasModules = modules.isNotEmpty;
+                    final disconnected = modules
+                        .where((m) => (m['status'] as String?) != 'connected')
+                        .toList();
+                    final st = _headerState(
+                      pendingAlerts: pendingList.length,
+                      hasModules: hasModules,
+                      anyDisconnected: disconnected.isNotEmpty,
+                    );
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: const BoxDecoration(
-                            color: AppTheme.primary,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Monitoreo en tiempo real activo',
-                          style: GoogleFonts.manrope(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: AppTheme.primary,
-                          ),
+                        _header(st),
+                        const SizedBox(height: 20),
+                        _statusCard(
+                          context,
+                          pendingList: pendingList,
+                          hasModules: hasModules,
+                          disconnected: disconnected,
                         ),
                       ],
-                    ),
-                  ),
-                ],
-              ),
+                    );
+                  },
+                );
+              },
             ),
             const SizedBox(height: 24),
 
@@ -189,7 +559,7 @@ class DashboardScreen extends StatelessWidget {
                   ),
                 ),
                 TextButton(
-                  onPressed: () {},
+                  onPressed: onSeeAllHistory,
                   style: TextButton.styleFrom(
                     padding: EdgeInsets.zero,
                     minimumSize: Size.zero,
@@ -333,127 +703,9 @@ class DashboardScreen extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 20),
-
-            // ── Camera Location / Map Card ────────────────────────────
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: SizedBox(
-                height: 160,
-                child: Stack(
-                  children: [
-                    // Map placeholder
-                    CustomPaint(
-                      size: const Size(double.infinity, 160),
-                      painter: _MapPlaceholderPainter(),
-                      child: const SizedBox.expand(),
-                    ),
-                    // Gradient overlay
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [
-                              AppTheme.primary,
-                              AppTheme.primary.withValues(alpha: 0.0),
-                            ],
-                            stops: const [0.0, 1.0],
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.videocam,
-                                color: Colors.white, size: 16),
-                            const SizedBox(width: 8),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Ubicación de Cámara',
-                                  style: GoogleFonts.manrope(
-                                    fontSize: 10,
-                                    color: Colors.white.withValues(alpha: 0.8),
-                                  ),
-                                ),
-                                StreamBuilder<Map<String, dynamic>?>(
-                                  stream: AlertService.userProfileStream(),
-                                  builder: (ctx, snap) => Text(
-                                    snap.data?['cameraLocation'] as String? ??
-                                        'Cámara vinculada',
-                                    style: GoogleFonts.manrope(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
           ],
         ),
       ),
     );
   }
-}
-
-class _MapPlaceholderPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Background
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..color = const Color(0xFFDEEDD6),
-    );
-    // Roads
-    final road = Paint()
-      ..color = const Color(0xFFC8DFC0)
-      ..strokeWidth = 22
-      ..strokeCap = StrokeCap.butt;
-    canvas.drawLine(
-        Offset(0, size.height * 0.55),
-        Offset(size.width, size.height * 0.55),
-        road);
-    canvas.drawLine(
-        Offset(size.width * 0.38, 0),
-        Offset(size.width * 0.38, size.height),
-        road);
-    // Road lines
-    final roadLine = Paint()
-      ..color = Colors.white.withValues(alpha: 0.6)
-      ..strokeWidth = 1.5;
-    canvas.drawLine(
-        Offset(0, size.height * 0.55),
-        Offset(size.width, size.height * 0.55),
-        roadLine);
-    // Location pin
-    final pin = Paint()..color = const Color(0xFFD32F2F);
-    final pinCenter = Offset(size.width * 0.38, size.height * 0.38);
-    canvas.drawCircle(pinCenter, 18, pin);
-    canvas.drawCircle(pinCenter, 7, Paint()..color = Colors.white);
-    // Pin drop shadow
-    final shadow = Paint()
-      ..color = Colors.black.withValues(alpha: 0.2)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-    canvas.drawCircle(pinCenter.translate(0, 2), 18, shadow);
-    canvas.drawCircle(pinCenter, 18, pin);
-    canvas.drawCircle(pinCenter, 7, Paint()..color = Colors.white);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

@@ -78,10 +78,12 @@ class WebSocketHandler:
             # Registrar conexión
             await self._connection_manager.connect(module_id, websocket)
 
-            # Confirmar conexión al módulo
+            # Confirmar conexión al módulo e informar si ya está vinculado
+            # a un usuario, para que decida si arrancar la detección
             await websocket.send_text(json.dumps({
                 "type":      "connected",
                 "module_id": module_id,
+                "linked":    module.user_id is not None,
             }))
 
             logger.info(f"Módulo conectado: {module_id}")

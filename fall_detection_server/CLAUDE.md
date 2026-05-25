@@ -90,7 +90,8 @@ Toda la cableada ocurre en `main.py` → `startup()`. No hay service locator ni 
 | `DisconnectModule` | WebSocket disconnect | Marca el módulo como DISCONNECTED en Firestore |
 | `HandleFallAlert` | WebSocket `fall_alert` | Guarda la Alert en Firestore y envía push FCM al usuario vinculado |
 | `GenerateUploadUrl` | WebSocket `request_upload_url` | Genera presigned URL GCS para PUT del clip. Requiere módulo vinculado a usuario. |
-| `LinkModule` | REST `POST /api/modules/link` | Asocia un `module_id` a un `user_id`. Rechaza si el módulo ya está vinculado a otro usuario. |
+| `LinkModule` | REST `POST /api/modules/link` | Asocia un `module_id` a un `user_id`. Rechaza si el módulo ya está vinculado a otro usuario. Empuja `module_linked` al módulo si está conectado. |
+| `UnlinkModule` | REST `POST /api/modules/unlink` | Pone `user_id = None`. Rechaza si el módulo pertenece a otro usuario. Empuja `module_unlinked` al módulo si está conectado. |
 
 ---
 
@@ -124,8 +125,14 @@ La conexión requiere el query param `api_key`. Si falta o es incorrecto, el ser
 ### Mensajes servidor → módulo
 
 ```jsonc
-// Confirmación de conexión
-{ "type": "connected", "module_id": "uuid" }
+// Confirmación de conexión — 'linked' indica si el módulo ya está vinculado a un usuario
+{ "type": "connected", "module_id": "uuid", "linked": true }
+
+// Vinculación en caliente (tras POST /api/modules/link) → el módulo arranca la detección
+{ "type": "module_linked" }
+
+// Desvinculación en caliente (tras POST /api/modules/unlink) → el módulo pausa la detección
+{ "type": "module_unlinked" }
 
 // Respuesta a request_upload_url (éxito)
 { "type": "upload_url", "clip_id": "uuid-clip",
@@ -136,6 +143,8 @@ La conexión requiere el query param `api_key`. Si falta o es incorrecto, el ser
 // Respuesta a request_upload_url (error — módulo no vinculado, etc.)
 { "type": "upload_url_error", "clip_id": "uuid-clip", "error": "descripción" }
 ```
+
+> El campo `linked` y los mensajes `module_linked` / `module_unlinked` permiten que el módulo no inicie la detección hasta estar vinculado a un usuario. Ver la sección correspondiente en `fall_detection_module/CLAUDE.md`.
 
 ---
 
@@ -150,6 +159,7 @@ El token se verifica con Firebase Auth. El `uid` del token debe coincidir con el
 | `POST` | `/api/users` | Crea un usuario nuevo. Retorna `409` si ya existe. |
 | `PATCH` | `/api/users/{user_id}/fcm-token` | Actualiza el FCM token del usuario |
 | `POST` | `/api/modules/link` | Vincula módulo a usuario. Retorna `403` si ya está vinculado a otro usuario. |
+| `POST` | `/api/modules/unlink` | Desvincula módulo de su usuario. Retorna `403` si pertenece a otro usuario. |
 | `GET` | `/api/modules/status/{module_id}` | Estado del módulo: `status`, `last_seen`, `cameras` |
 | `GET` | `/api/alerts?user_id={uid}[&status=detected\|confirmed\|falseAlarm]` | Historial de alertas del usuario (desc por timestamp). Filtro de estado opcional. |
 | `PATCH` | `/api/alerts/{alert_id}/seen` | Actualiza el status de una alerta. Solo acepta `confirmed` o `falseAlarm`. |
@@ -341,7 +351,7 @@ fall_detection_server/
 │
 ├── application/
 │   ├── dtos/
-│   │   ├── module_dtos.py           ← ConnectModuleCommand, LinkModuleCommand, CameraInfoDTO
+│   │   ├── module_dtos.py           ← ConnectModuleCommand, LinkModuleCommand, UnlinkModuleCommand, CameraInfoDTO
 │   │   ├── alert_dtos.py            ← ProcessFallAlertCommand, GenerateUploadUrlCommand
 │   │   └── user_dtos.py             ← CreateUserCommand, UpdateFCMTokenCommand
 │   ├── ports/
@@ -353,7 +363,8 @@ fall_detection_server/
 │       ├── disconnect_module.py
 │       ├── handle_fall_alert.py
 │       ├── generate_upload_url.py
-│       └── link_module.py
+│       ├── link_module.py
+│       └── unlink_module.py
 │
 ├── infrastructure/
 │   ├── firestore/

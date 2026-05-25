@@ -12,21 +12,35 @@ class LinkedCamerasScreen extends StatefulWidget {
 
 class _LinkedCamerasScreenState extends State<LinkedCamerasScreen> {
   Future<void> _showLinkDialog() async {
-    final controller = TextEditingController();
-    final moduleId = await showDialog<String>(
+    final idController = TextEditingController();
+    final nameController = TextEditingController();
+    final result = await showDialog<(String, String)>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
           'Vincular nuevo módulo',
           style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
         ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'ID del módulo',
-            hintText: 'FG-XXXX-XXXX',
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: idController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'ID del módulo',
+                hintText: 'FG-XXXX-XXXX',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'Nombre visible (opcional)',
+                hintText: 'Ej: Sala principal',
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -34,20 +48,21 @@ class _LinkedCamerasScreenState extends State<LinkedCamerasScreen> {
             child: const Text('Cancelar'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            onPressed: () => Navigator.pop(
+              ctx,
+              (idController.text.trim(), nameController.text.trim()),
+            ),
             child: const Text('Vincular'),
           ),
         ],
       ),
     );
-    if (moduleId == null || moduleId.isEmpty || !mounted) return;
+    if (result == null || result.$1.isEmpty || !mounted) return;
+    final moduleId = result.$1;
+    final displayName = result.$2;
 
     try {
       await AlertService.linkModule(moduleId);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Módulo vinculado correctamente')),
-      );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -56,7 +71,30 @@ class _LinkedCamerasScreenState extends State<LinkedCamerasScreen> {
           backgroundColor: AppTheme.alertRed,
         ),
       );
+      return;
     }
+
+    // Vinculado correctamente — asignar el nombre si se ingresó uno
+    if (displayName.isNotEmpty) {
+      try {
+        await AlertService.renameModule(moduleId, displayName);
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Módulo vinculado, pero no se pudo guardar el nombre. Edítalo luego.'),
+            backgroundColor: AppTheme.alertRed,
+          ),
+        );
+        return;
+      }
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Módulo vinculado correctamente')),
+    );
   }
 
   @override
@@ -109,7 +147,21 @@ class _LinkedCamerasScreenState extends State<LinkedCamerasScreen> {
                           itemCount: modules.length,
                           separatorBuilder: (_, __) =>
                               const SizedBox(height: 10),
-                          itemBuilder: (_, i) => _moduleTile(modules[i]),
+                          itemBuilder: (_, i) {
+                            final data = modules[i];
+                            final moduleId =
+                                data['module_id'] as String? ?? 'desconocido';
+                            return Dismissible(
+                              key: ValueKey(moduleId),
+                              direction: DismissDirection.endToStart,
+                              background: _deleteBackground(),
+                              confirmDismiss: (_) => _confirmUnlink(
+                                moduleId,
+                                data['display_name'] as String?,
+                              ),
+                              child: _moduleTile(data),
+                            );
+                          },
                         ),
                 ),
                 const SizedBox(height: 12),
@@ -144,6 +196,71 @@ class _LinkedCamerasScreenState extends State<LinkedCamerasScreen> {
         ],
       ),
     );
+  }
+
+  Widget _deleteBackground() {
+    return Container(
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      decoration: BoxDecoration(
+        color: AppTheme.alertRed,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: const Icon(Icons.link_off, color: Colors.white),
+    );
+  }
+
+  /// Confirma y desvincula el módulo. Devuelve siempre `false`: la tarjeta no la
+  /// quita el Dismissible sino el stream de Firestore al cambiar `user_id`,
+  /// evitando el assert "dismissed Dismissible still in tree".
+  Future<bool> _confirmUnlink(String moduleId, String? displayName) async {
+    final label = displayName ?? moduleId;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          'Desvincular módulo',
+          style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          'Se detendrá la detección de "$label". ¿Desvincular este módulo?',
+          style: GoogleFonts.manrope(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Desvincular',
+              style: TextStyle(color: AppTheme.alertRed),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return false;
+
+    try {
+      await AlertService.unlinkModule(moduleId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Módulo desvinculado')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo desvincular el módulo'),
+            backgroundColor: AppTheme.alertRed,
+          ),
+        );
+      }
+    }
+    return false;
   }
 
   Future<void> _renameModule(String moduleId, String? currentName) async {

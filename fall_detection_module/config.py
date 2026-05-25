@@ -27,6 +27,23 @@ def _load_or_create_module_id(id_file: str = "data/module_id.txt") -> str:
 
 MODULE_ID = _load_or_create_module_id()
 
+
+# ── Estado de vinculación ─────────────────────────────────────────────────────
+# Se persiste para sobrevivir reinicios estando offline. El servidor lo re-afirma
+# al reconectar, así que si te desvincularon offline se corrige en la próxima conexión.
+LINKED_STATE_PATH = os.getenv("LINKED_STATE_PATH", "data/linked_state.txt")
+
+def load_linked_state() -> bool:
+    path = Path(LINKED_STATE_PATH)
+    if path.exists():
+        return path.read_text().strip() == "1"
+    return False
+
+def save_linked_state(linked: bool) -> None:
+    path = Path(LINKED_STATE_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("1" if linked else "0")
+
 # Fuente de video — índice de cámara o ruta a video
 CAMERA_SOURCE = os.getenv("CAMERA_SOURCE", "0")
 

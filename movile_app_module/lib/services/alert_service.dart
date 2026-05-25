@@ -73,6 +73,17 @@ class AlertService {
     }
   }
 
+  static Future<void> unlinkModule(String moduleId) async {
+    final res = await http.post(
+      Uri.parse('$_baseUrl/api/modules/unlink'),
+      headers: await _headers(),
+      body: jsonEncode({'module_id': moduleId, 'user_id': _uid}),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('unlinkModule failed: ${res.statusCode} ${res.body}');
+    }
+  }
+
   static Future<void> renameModule(String moduleId, String displayName) async {
     final res = await http.patch(
       Uri.parse('$_baseUrl/api/modules/$moduleId/name'),

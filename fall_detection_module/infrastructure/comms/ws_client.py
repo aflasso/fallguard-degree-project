@@ -40,12 +40,14 @@ class WebSocketClient(AlertSender):
         cameras:     list,
         on_set_camera:     Optional[Callable[[int], None]]  = None,
         on_config_update:  Optional[Callable[[dict], None]] = None,
+        on_link_status:    Optional[Callable[[bool], None]] = None,
     ):
         self._server_url       = server_url
         self._module_id        = module_id
         self._cameras          = cameras
         self._on_set_camera    = on_set_camera
         self._on_config_update = on_config_update
+        self._on_link_status   = on_link_status
 
         self._ws:              Optional[websocket.WebSocketApp] = None
         self._connected:       bool      = False
@@ -205,6 +207,18 @@ class WebSocketClient(AlertSender):
 
             if msg_type == "connected":
                 logger.info(f"Servidor confirmó conexión: {data}")
+                if self._on_link_status:
+                    self._on_link_status(bool(data.get("linked", False)))
+
+            elif msg_type == "module_linked":
+                logger.info("Servidor notifica: módulo vinculado a un usuario")
+                if self._on_link_status:
+                    self._on_link_status(True)
+
+            elif msg_type == "module_unlinked":
+                logger.info("Servidor notifica: módulo desvinculado")
+                if self._on_link_status:
+                    self._on_link_status(False)
 
             elif msg_type == "set_camera":
                 camera_id = data.get("camera_id")
