@@ -91,8 +91,19 @@ def detection_thread(detect_fall, clip_recorder, active_cam):
 
         frame = active_cam.instance.read()
         if frame is None:
+            cam = active_cam.instance
+            if cam.is_stream:
+                # Stream de red: un None es un corte temporal — reconectar sin
+                # matar el módulo. Bloquea aquí (no hay nada que detectar) pero
+                # respeta stop_event para poder apagar limpiamente.
+                logger.warning("Stream sin frames — intentando reconectar...")
+                if cam.reconnect(lambda: not stop_event.is_set()):
+                    detect_fall.reset()   # ventana limpia tras el corte
+                    continue
+                break   # cancelado por stop_event
+            # Archivo/cámara local: None es fin de la fuente → detener todo
             logger.info("Video terminado — deteniendo módulo")
-            stop_event.set()   # ← detener todo
+            stop_event.set()
             break
 
         clip_recorder.add_frame(frame)
