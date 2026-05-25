@@ -495,6 +495,142 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
+  // ── Historial reciente ────────────────────────────────────────────────────
+  ({String label, Color color, Color bg, IconData icon}) _alertVisual(
+      AlertStatus status) {
+    switch (status) {
+      case AlertStatus.detected:
+        return (
+          label: 'Caída sin confirmar',
+          color: AppTheme.alertRed,
+          bg: AppTheme.alertRedLight,
+          icon: Icons.warning_amber_rounded,
+        );
+      case AlertStatus.confirmed:
+        return (
+          label: 'Caída confirmada',
+          color: const Color(0xFF2E7D32),
+          bg: const Color(0xFFE8F5E9),
+          icon: Icons.check_circle_outline,
+        );
+      case AlertStatus.falseAlarm:
+        return (
+          label: 'Falsa alarma',
+          color: AppTheme.textSecondary,
+          bg: const Color(0xFFF1F3F5),
+          icon: Icons.cancel_outlined,
+        );
+    }
+  }
+
+  Widget _historyRow(BuildContext context, AlertModel a) {
+    final v = _alertVisual(a.status);
+    final ts = a.timestamp;
+    final date = '${ts.day}/${ts.month}/${ts.year}';
+    final time = '${ts.hour}:${ts.minute.toString().padLeft(2, '0')}';
+    return InkWell(
+      onTap: () => Navigator.pushNamed(
+        context,
+        '/emergency',
+        arguments: {
+          'alertId': a.id,
+          'timestamp': a.timestamp.toIso8601String(),
+          'status': a.status.name,
+        },
+      ),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 10,
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: v.bg,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Icon(v.icon, color: v.color, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    v.label,
+                    style: GoogleFonts.manrope(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$date · $time',
+                    style: GoogleFonts.manrope(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: AppTheme.iconLight, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyHistoryCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryContainer,
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: const Icon(Icons.check_circle_outline,
+                color: AppTheme.primary, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            'Sin alertas recientes',
+            style: GoogleFonts.manrope(
+              fontSize: 14,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -578,128 +714,20 @@ class DashboardScreen extends StatelessWidget {
             ),
             const SizedBox(height: 10),
 
-            // ── Alert Item ────────────────────────────────────────────
-            StreamBuilder<AlertModel?>(
-              stream: AlertService.latestAlertStream(),
+            // ── Historial reciente (tiempo real) ───────────────────────
+            StreamBuilder<List<AlertModel>>(
+              stream: AlertService.alertsStream(),
               builder: (context, snapshot) {
-                final alert = snapshot.data;
-                if (alert == null) {
-                  return Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppTheme.surface,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.04),
-                          blurRadius: 10,
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(11),
-                          ),
-                          child: const Icon(Icons.check_circle_outline,
-                              color: AppTheme.primary, size: 22),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Sin alertas recientes',
-                          style: GoogleFonts.manrope(
-                            fontSize: 14,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-                return Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.04),
-                        blurRadius: 10,
-                      ),
+                final alerts = snapshot.data ?? [];
+                if (alerts.isEmpty) return _emptyHistoryCard();
+                final recent = alerts.take(4).toList();
+                return Column(
+                  children: [
+                    for (int i = 0; i < recent.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 10),
+                      _historyRow(context, recent[i]),
                     ],
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          color: AppTheme.alertRedLight,
-                          borderRadius: BorderRadius.circular(11),
-                        ),
-                        child: const Icon(
-                          Icons.warning_amber_rounded,
-                          color: AppTheme.alertRed,
-                          size: 22,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  'Caída detectada',
-                                  style: GoogleFonts.manrope(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                ),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      alert.location.toUpperCase(),
-                                      style: GoogleFonts.manrope(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                        color: AppTheme.alertRed,
-                                      ),
-                                    ),
-                                    Text(
-                                      '${alert.timestamp.hour}:${alert.timestamp.minute.toString().padLeft(2, '0')}',
-                                      style: GoogleFonts.manrope(
-                                        fontSize: 12,
-                                        color: AppTheme.textSecondary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 5),
-                            Text(
-                              alert.description,
-                              style: GoogleFonts.manrope(
-                                fontSize: 12,
-                                color: AppTheme.textSecondary,
-                                height: 1.4,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                  ],
                 );
               },
             ),
