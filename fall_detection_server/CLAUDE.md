@@ -72,10 +72,10 @@ Toda la cableada ocurre en `main.py` → `startup()`. No hay service locator ni 
 
 | Entidad | Campos clave | Descripción |
 |---|---|---|
-| `Module` | `module_id`, `status`, `last_seen`, `user_id`, `cameras`, `display_name` | Módulo local de detección. `user_id` es `None` si no está vinculado. `display_name` es un nombre opcional que el usuario asigna desde la app. |
+| `Module` | `module_id`, `status`, `last_seen`, `user_id`, `cameras`, `display_name`, `camera_ok`, `camera_status_at`, `camera_status_reason`, `camera_url` | Módulo local de detección. `user_id` es `None` si no está vinculado. `display_name` es un nombre opcional que el usuario asigna desde la app. `camera_ok` indica si su cámara entrega frames. `camera_url` es la fuente de video que el usuario eligió; `None` = sin configurar y el módulo no detecta. |
 | `User` | `user_id`, `email`, `fcm_token` | Usuario de la app móvil. `fcm_token` es necesario para recibir push. |
 | `Alert` | `alert_id`, `module_id`, `user_id`, `timestamp`, `confidence`, `clip_url`, `seen`, `status` | Evento de caída confirmado. |
-| `ModuleStatus` | `CONNECTED`, `DISCONNECTED` | Estado de conexión del módulo. |
+| `ModuleStatus` | `CONNECTED`, `DISCONNECTED` | Estado de **conexión** del módulo. Ortogonal a `camera_ok`. |
 | `AlertStatus` | `DETECTED`, `CONFIRMED`, `FALSE_ALARM` | Estado de la alerta. `DETECTED` es el estado inicial; el usuario puede confirmar o descartar. |
 
 ---
@@ -89,6 +89,8 @@ Toda la cableada ocurre en `main.py` → `startup()`. No hay service locator ni 
 | `ConnectModule` | WebSocket `module_connect` | Registra el módulo en Firestore si es nuevo, actualiza status a CONNECTED |
 | `DisconnectModule` | WebSocket disconnect | Marca el módulo como DISCONNECTED en Firestore |
 | `HandleFallAlert` | WebSocket `fall_alert` | Guarda la Alert en Firestore y envía push FCM al usuario vinculado |
+| `UpdateCameraStatus` | WebSocket `camera_status` | Persiste si la cámara del módulo entrega frames. No escribe si el estado no cambió (el módulo re-afirma en cada reconexión). No toca `status`. |
+| `SetCameraSource` | REST `PATCH /api/modules/{id}/camera` | Valida la URL (`domain/camera_source.py`), la persiste y la empuja al módulo si está conectado. Resetea `camera_ok` a `True`. |
 | `GenerateUploadUrl` | WebSocket `request_upload_url` | Genera presigned URL GCS para PUT del clip. Requiere módulo vinculado a usuario. |
 | `LinkModule` | REST `POST /api/modules/link` | Asocia un `module_id` a un `user_id`. Rechaza si el módulo ya está vinculado a otro usuario. Empuja `module_linked` al módulo si está conectado. |
 | `UnlinkModule` | REST `POST /api/modules/unlink` | Pone `user_id = None`. Rechaza si el módulo pertenece a otro usuario. Empuja `module_unlinked` al módulo si está conectado. |
@@ -110,6 +112,11 @@ La conexión requiere el query param `api_key`. Si falta o es incorrecto, el ser
 
 // Heartbeat (cada 30 s)
 { "type": "heartbeat", "module_id": "uuid", "timestamp": "2026-04-12T14:30:00Z" }
+
+// Estado de la cámara — el heartbeat dice que el módulo vive; esto dice si además ve.
+// Edge-triggered (se emite en la transición) y re-afirmado en cada reconexión.
+{ "type": "camera_status", "module_id": "uuid", "camera_ok": false,
+  "reason": "sin frames", "timestamp": "2026-04-12T14:30:00Z" }
 
 // Solicitar URL para subir clip
 { "type": "request_upload_url", "module_id": "uuid", "clip_id": "uuid-clip" }
@@ -140,6 +147,11 @@ La conexión requiere el query param `api_key`. Si falta o es incorrecto, el ser
   "public_url": "https://storage.googleapis.com/...",
   "expires_in": 300 }
 
+// Fuente de video elegida por el usuario en la app. Se envía justo después de
+// 'connected' (si el módulo tiene una configurada) y cada vez que el usuario
+// la cambia desde la app. El servidor es la fuente de verdad.
+{ "type": "set_camera_source", "url": "http://192.168.1.42:8080/video" }
+
 // Respuesta a request_upload_url (error — módulo no vinculado, etc.)
 { "type": "upload_url_error", "clip_id": "uuid-clip", "error": "descripción" }
 ```
@@ -160,7 +172,8 @@ El token se verifica con Firebase Auth. El `uid` del token debe coincidir con el
 | `PATCH` | `/api/users/{user_id}/fcm-token` | Actualiza el FCM token del usuario |
 | `POST` | `/api/modules/link` | Vincula módulo a usuario. Retorna `403` si ya está vinculado a otro usuario. |
 | `POST` | `/api/modules/unlink` | Desvincula módulo de su usuario. Retorna `403` si pertenece a otro usuario. |
-| `GET` | `/api/modules/status/{module_id}` | Estado del módulo: `status`, `last_seen`, `cameras` |
+| `GET` | `/api/modules/status/{module_id}` | Estado del módulo: `status`, `last_seen`, `cameras`, `camera_ok`, `camera_status_at`, `camera_status_reason`, `camera_url` |
+| `PATCH` | `/api/modules/{module_id}/camera` | Configura la fuente de video (`{"url": "..."}`). `400` si la URL es inválida (el `detail` está redactado para mostrarlo al usuario), `403` si no es tuyo, `404` si no existe. |
 | `GET` | `/api/alerts?user_id={uid}[&status=detected\|confirmed\|falseAlarm]` | Historial de alertas del usuario (desc por timestamp). Filtro de estado opcional. |
 | `PATCH` | `/api/alerts/{alert_id}/seen` | Actualiza el status de una alerta. Solo acepta `confirmed` o `falseAlarm`. |
 | `DELETE` | `/api/alerts/{alert_id}` | Elimina una alerta del historial. Verifica que pertenezca al usuario del token. |
@@ -195,7 +208,7 @@ Los repositorios implementan una clase base genérica `FirestoreRepository[T]` e
 `infrastructure/firebase/fcm_sender.py` implementa el puerto `NotificationSender`. Envía dos tipos de push:
 
 - **`send_fall_alert`** — incluye campo `notification` (título + body) para que Android muestre la notificación del sistema en background, más `data` con `alert_id`, `timestamp`, `clip_url`. Prioridad `high` / `max` para heads-up display.
-- **`send_module_disconnected`** — notifica cuando el módulo deja de enviar heartbeats.
+- **`send_module_disconnected`** — **código muerto**: está implementado pero ningún caso de uso lo invoca. Hoy no se envía ningún push por desconexión del módulo.
 
 ### GCS (Google Cloud Storage)
 
@@ -270,7 +283,7 @@ Variables de entorno (ver `.env.template`):
 | `HOST` | `0.0.0.0` | Host del servidor |
 | `PORT` | `8000` | Puerto del servidor |
 | `LOG_LEVEL` | `INFO` | Nivel de logging |
-| `HEARTBEAT_TIMEOUT` | `90` | Segundos sin heartbeat para considerar módulo desconectado |
+| `HEARTBEAT_TIMEOUT` | `90` | **Definida pero no usada.** No existe monitor de heartbeat — ver abajo |
 | `MODULE_API_KEY` | `""` | API key que deben presentar los módulos al conectarse via WebSocket |
 
 Generar `MODULE_API_KEY`: `python -c "import secrets; print(secrets.token_hex(32))"`
@@ -345,6 +358,7 @@ fall_detection_server/
 │
 ├── domain/
 │   ├── entities.py                  ← Module, User, Alert, ModuleStatus, AlertStatus
+│   ├── camera_source.py             ← validate_camera_url (allowlist de esquemas)
 │   └── repositories/
 │       ├── base_repository.py       ← ABC genérico Repository[T]
 │       ├── module_repository.py     ← ABC ModuleRepository
@@ -363,6 +377,8 @@ fall_detection_server/
 │   └── use_cases/
 │       ├── connect_module.py
 │       ├── disconnect_module.py
+│       ├── update_camera_status.py  ← persiste camera_ok reportado por el módulo
+│       ├── set_camera_source.py     ← valida y empuja la URL de cámara al módulo
 │       ├── handle_fall_alert.py
 │       ├── generate_upload_url.py
 │       ├── link_module.py
@@ -425,6 +441,31 @@ Las URLs tienen 15 min de vigencia. Si se generaran al momento de la alerta, exp
 
 **¿Por qué `AlertStatus` usa `DETECTED` y no `PENDING`?**
 Documentos antiguos en Firestore usaban `"pending"` — el repositorio normaliza ese valor a `"detected"` via `_normalize_status()` para mantener compatibilidad hacia atrás sin migración de datos.
+
+**¿Por qué la URL de cámara se valida en `domain/` y no en el schema Pydantic?**
+Es una regla de negocio, no de transporte. Y es una regla de **seguridad**: el módulo pasa esa cadena directo a `cv2.VideoCapture`, que abre mucho más que streams de red — rutas del filesystem, `file://`, globs de imágenes. Sin la allowlist de esquemas (`http`, `https`, `rtsp`, `rtmp`, `udp`, `tcp`), un `file:///etc/passwd` haría que el módulo intentara "detectar caídas" sobre un archivo local del contenedor.
+
+**¿Por qué se rechazan las credenciales embebidas en la URL?**
+`rtsp://usuario:clave@host` quedaría en texto plano en el documento de Firestore, que el dueño del módulo puede leer y que la app pinta en pantalla. Cuando se soporten, irán en un campo cifrado aparte (`camera_auth_enc` + `CAMERA_AUTH_KEY` en el `.env`), con la URL limpia en `camera_url`. Rechazarlas **ahora** significa que agregarlas después no requiere migrar datos.
+
+**¿Por qué `SetCameraSource` resetea `camera_ok` a `True`?**
+Sin eso, la app mostraría "sin señal" heredado de la cámara anterior hasta que el módulo reportara su primer `camera_status` de la cámara nueva. El módulo corrige el valor real en segundos.
+
+**¿Por qué la fuente se re-envía al conectar y no solo al cambiarla?**
+El servidor es la fuente de verdad. Un módulo recién instalado (sin `CAMERA_SOURCE`) nunca recibiría la cámara que el usuario ya eligió; y uno que estuvo offline mientras el usuario la cambió se quedaría con la vieja. Por eso `WebSocketHandler.handle` envía `set_camera_source` justo después de `connected` si `module.camera_url` no es `None`.
+
+**¿Por qué `camera_ok` es un campo aparte y no un valor de `ModuleStatus`?**
+Son dos ejes independientes: el WebSocket puede estar vivo o muerto, y la cámara puede estar viendo o ciega, en cualquier combinación. Meterlos en un solo enum obligaría a inventar estados como `CONNECTED_BUT_BLIND` y a que todo el código que hace `status == CONNECTED` decidiera cuál de los dos significados quiere. Un módulo `CONNECTED` con `camera_ok = false` está online y no detecta nada.
+
+**¿Por qué `UpdateCameraStatus` no escribe si el estado no cambió?**
+El módulo re-afirma su `camera_status` en cada reconexión, así que la mayoría de los mensajes no son transiciones. Escribir igual mantendría vivos los listeners de Firestore de la app por nada. Los documentos anteriores a este campo se leen con `data.get("camera_ok", True)` — no hace falta migración, porque el módulo re-afirma su estado real al conectarse.
+
+**¿Qué detecta realmente la desconexión de un módulo? (no el heartbeat)**
+El mensaje `heartbeat` hoy solo produce un `logger.debug` — ni siquiera actualiza `last_seen`, que se escribe únicamente en `connect` y `disconnect`. Quien detecta un módulo muerto es **uvicorn**, con sus defaults `ws_ping_interval=20.0` / `ws_ping_timeout=20.0`: un módulo que muere sin cerrar el socket se descubre en 20–40 s, salta `WebSocketDisconnect` y el `finally` de `WebSocketHandler.handle` ejecuta `DisconnectModule`.
+
+Quedan dos huecos conocidos:
+- Si el proceso del servidor muere de golpe, el `finally` no corre y los módulos quedan `CONNECTED` en Firestore. Los que sigan vivos se corrigen al reconectar; uno que estaba apagado en ese momento **queda marcado `CONNECTED` para siempre**. Se arreglaría marcando `DISCONNECTED` al arrancar todo lo que no esté en el `connection_manager`.
+- No hay push por desconexión (`send_module_disconnected` nunca se llama).
 
 **¿Por qué se normaliza `user_id` vacío a `None` al leer el módulo?**
 `FirestoreModuleRepository._from_dict` hace `data.get("user_id") or None`. Si una edición manual en Firestore deja `user_id` como `""` (string vacío) en vez de borrarlo, `"" is not None` daría `True` y el módulo se consideraría vinculado (mandaría `connected: linked=true`, intentaría generar presigned URL con un `user_id` vacío). Normalizar a `None` mantiene consistente el chequeo `user_id is None` en todo el servidor (link, upload, `connected`).

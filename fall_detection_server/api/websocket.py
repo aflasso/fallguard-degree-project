@@ -14,15 +14,21 @@ from api.schemas import (
     FallAlertSchema,
     RequestUploadUrlSchema,
     HeartbeatSchema,
+    CameraStatusSchema,
 )
 
 
-from application.dtos.module_dtos import ConnectModuleCommand, CameraInfoDTO
+from application.dtos.module_dtos import (
+    ConnectModuleCommand,
+    CameraInfoDTO,
+    UpdateCameraStatusCommand,
+)
 from application.dtos.alert_dtos import ProcessFallAlertCommand, GenerateUploadUrlCommand
 from application.use_cases.connect_module import ConnectModule
 from application.use_cases.handle_fall_alert import HandleFallAlert
 from application.use_cases.generate_upload_url import GenerateUploadUrl
 from application.use_cases.disconnect_module import DisconnectModule
+from application.use_cases.update_camera_status import UpdateCameraStatus
 from infrastructure.websocket.connection_manager import WebSocketConnectionManager
 
 logger = logging.getLogger(__name__)
@@ -40,12 +46,14 @@ class WebSocketHandler:
         handle_fall_alert:    HandleFallAlert,
         disconnect_module:    DisconnectModule,
         generate_upload_url:  GenerateUploadUrl,
+        update_camera_status: UpdateCameraStatus,
     ):
-        self._connection_manager  = connection_manager
-        self._connect_module      = connect_module
-        self._disconnect_module   = disconnect_module
-        self._handle_fall_alert   = handle_fall_alert
-        self._generate_upload_url = generate_upload_url
+        self._connection_manager   = connection_manager
+        self._connect_module       = connect_module
+        self._disconnect_module    = disconnect_module
+        self._handle_fall_alert    = handle_fall_alert
+        self._generate_upload_url  = generate_upload_url
+        self._update_camera_status = update_camera_status
 
     async def handle(self, websocket: WebSocket) -> None:
         """
@@ -86,6 +94,16 @@ class WebSocketHandler:
                 "linked":    module.user_id is not None,
             }))
 
+            # Re-afirmar la fuente de video. El servidor es la fuente de verdad:
+            # si el usuario la cambió mientras el módulo estaba offline, se
+            # entera acá. Sin esto, un módulo recién instalado (sin CAMERA_SOURCE)
+            # nunca recibiría la cámara que el usuario eligió en la app.
+            if module.camera_url:
+                await websocket.send_text(json.dumps({
+                    "type": "set_camera_source",
+                    "url":  module.camera_url,
+                }))
+
             logger.info(f"Módulo conectado: {module_id}")
 
             # Loop de mensajes
@@ -115,6 +133,15 @@ class WebSocketHandler:
         if msg_type == "heartbeat":
             # Solo log — el heartbeat confirma que el módulo sigue vivo
             logger.debug(f"Heartbeat recibido: {module_id}")
+
+        elif msg_type == "camera_status":
+            # El heartbeat dice que el módulo vive; esto dice si además ve.
+            schema = CameraStatusSchema(**data)
+            await self._update_camera_status.execute(UpdateCameraStatusCommand(
+                module_id= schema.module_id,
+                camera_ok= schema.camera_ok,
+                reason=    schema.reason,
+            ))
 
         elif msg_type == "fall_alert":
             schema  = FallAlertSchema(**data)

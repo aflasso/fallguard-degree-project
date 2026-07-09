@@ -21,6 +21,22 @@ class ConnectModuleCommand:
 
 
 @dataclass
+class UpdateCameraStatusCommand:
+    """Comando para actualizar el estado de la cámara de un módulo."""
+    module_id: str
+    camera_ok: bool
+    reason:    str = ""
+
+
+@dataclass
+class SetCameraSourceCommand:
+    """Comando para configurar la fuente de video de un módulo desde la app."""
+    module_id: str
+    user_id:   str
+    url:       str
+
+
+@dataclass
 class LinkModuleCommand:
     """Comando para vincular un módulo a un usuario."""
     module_id: str

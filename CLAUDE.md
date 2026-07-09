@@ -10,9 +10,9 @@ Sistema distribuido para detección automática de caídas en hogares, con notif
 
 | Módulo | Carpeta | Descripción |
 |---|---|---|
-| Módulo local | `fall_detection_module/` | PC en el hogar. Captura video, detecta caídas con YOLO-pose + LSTM, graba clips, comunica con el servidor via WebSocket. |
+| Módulo local | `fall_detection_module/` | PC en el hogar. Captura video de una cámara IP (celular en la LAN), detecta caídas con YOLO-pose + LSTM, graba clips, comunica con el servidor via WebSocket. |
 | Servidor central | `fall_detection_server/` | Intermediario cloud. Gestiona módulos, reenvía alertas como push notifications (FCM), genera presigned URLs para GCS. |
-| App móvil | `movile_app_module/` | Recibe alertas, visualiza clips, vincula módulo via QR. |
+| App móvil | `movile_app_module/` | Recibe alertas, visualiza clips, vincula módulo via QR, configura y previsualiza la cámara del módulo. |
 | Modelo | `Modelo/` | Dataset, scripts de entrenamiento y modelo LSTM entrenado. |
 
 Cada módulo tiene su propio `CLAUDE.md` con contexto detallado.
@@ -21,15 +21,17 @@ Cada módulo tiene su propio `CLAUDE.md` con contexto detallado.
 
 ## Arquitectura general
 
+La **fuente de video la elige el usuario desde la app** (URL de la cámara IP). El servidor la valida, la persiste en Firestore y se la empuja al módulo por WebSocket, al conectar y cada vez que cambia. `CAMERA_SOURCE` del entorno es solo un valor de arranque para pruebas.
+
 ```
-[Cámara]
+[Cámara IP — celular en la LAN, MJPEG sobre HTTP o RTSP]
    ↓
 [fall_detection_module — PC en el hogar]
    ├── YOLO11x-pose (pretrained) → keypoints
    ├── LSTM → 3 clases (Normal / Cayendo / Post-caída)
    ├── Buffer circular de video
    └── WebSocket client
-          ↕ alertas / clips / heartbeat / config
+          ↕ alertas / clips / heartbeat / estado de cámara / config
 [fall_detection_server — cloud]
    ├── Firestore (módulos, usuarios, alertas)
    ├── FCM (push notifications → app móvil)
@@ -74,6 +76,11 @@ El primer mensaje del módulo **debe** ser `module_connect`. El servidor cierra 
 
 { "type": "heartbeat", "module_id": "uuid", "timestamp": "2026-04-12T14:30:00Z" }
 
+// El heartbeat dice que el módulo vive; esto dice si además ve.
+// Un módulo puede estar conectado y ciego (cámara IP congelada).
+{ "type": "camera_status", "module_id": "uuid", "camera_ok": false,
+  "reason": "sin frames", "timestamp": "2026-04-12T14:30:00Z" }
+
 { "type": "request_upload_url", "module_id": "uuid", "clip_id": "uuid-clip" }
 
 { "type": "fall_alert", "module_id": "uuid", "timestamp": "...",
@@ -91,6 +98,10 @@ El primer mensaje del módulo **debe** ser `module_connect`. El servidor cierra 
 
 { "type": "module_linked" }     // vinculación en caliente → arrancar detección
 { "type": "module_unlinked" }   // desvinculación en caliente → pausar detección
+
+// Fuente de video elegida por el usuario en la app. Se envía al conectar
+// (si hay una configurada) y cada vez que el usuario la cambia.
+{ "type": "set_camera_source", "url": "http://192.168.1.42:8080/video" }
 
 { "type": "upload_url", "clip_id": "uuid-clip",
   "presigned_url": "https://storage.googleapis.com/...", "expires_in": 300 }

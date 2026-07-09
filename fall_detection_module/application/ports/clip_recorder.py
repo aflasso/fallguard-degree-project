@@ -44,3 +44,21 @@ class ClipRecorder(ABC):
     def is_recording(self) -> bool:
         """True si hay una grabación en curso."""
         ...
+
+    @abstractmethod
+    def abort(self, reason: str) -> None:
+        """
+        Corta el flujo de frames: cierra anticipadamente la grabación en curso
+        (si la hay) y descarta el buffer de contexto acumulado.
+
+        Se llama cuando la fuente de video deja de entregar frames — un corte de
+        cámara IP. Sin esto, una grabación iniciada antes del corte nunca alcanza
+        sus context_after frames y el grabador queda trabado en is_recording(),
+        descartando toda caída posterior.
+
+        El clip en curso se cierra y se entrega igual (parcial pero válido): la
+        caída ya fue confirmada y su alerta debe salir. El buffer se descarta
+        porque sus frames son anteriores al corte y empalmarlos con los de
+        después produciría un clip con un salto temporal invisible.
+        """
+        ...

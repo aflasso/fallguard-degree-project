@@ -127,6 +127,24 @@ class OpenCVClipRecorder(ClipRecorder):
     def is_recording(self) -> bool:
         return self._recording
 
+    def abort(self, reason: str) -> None:
+        """
+        Cierra la grabación en curso y descarta el buffer de contexto.
+        Ver el puerto ClipRecorder para el razonamiento.
+        """
+        with self._lock:
+            if self._recording:
+                logger.warning(
+                    f"Grabación cortada ({reason}) — clip parcial con "
+                    f"{self._frames_after}/{self._context_after} frames posteriores"
+                )
+                self._finish_recording()   # entrega el clip via on_ready
+
+            if self._buffer:
+                logger.info(f"Buffer de contexto descartado ({reason}) — "
+                            f"{len(self._buffer)} frames")
+                self._buffer.clear()
+
     # ── Helpers ───────────────────────────────────────────────────────────
 
     def _finish_recording(self) -> None:

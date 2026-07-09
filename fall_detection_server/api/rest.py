@@ -21,13 +21,19 @@ from api.schemas import (
     ChangePasswordSchema,
     ResetPasswordSchema,
     RenameModuleSchema,
+    SetCameraSourceSchema,
 )
 from api.schemas.alert_schemas import RequestUploadUrlSchema, UpdateAlertStatusSchema
 from application.dtos.alert_dtos import GenerateUploadUrlCommand
-from application.dtos.module_dtos import LinkModuleCommand, UnlinkModuleCommand
+from application.dtos.module_dtos import (
+    LinkModuleCommand,
+    UnlinkModuleCommand,
+    SetCameraSourceCommand,
+)
 from application.use_cases.generate_upload_url import GenerateUploadUrl
 from application.use_cases.link_module import LinkModule
 from application.use_cases.unlink_module import UnlinkModule
+from application.use_cases.set_camera_source import SetCameraSource
 from application.ports.upload_url_generator import UploadUrlGenerator
 from domain.entities import AlertStatus
 import config
@@ -56,6 +62,7 @@ class RestHandler:
         connection_manager:   WebSocketConnectionManager,
         generate_upload_url:  GenerateUploadUrl,
         upload_url_generator: UploadUrlGenerator,
+        set_camera_source:    SetCameraSource,
     ):
         self._module_repo          = module_repository
         self._alert_repo           = alert_repository
@@ -65,6 +72,7 @@ class RestHandler:
         self._connection_mgr       = connection_manager
         self._generate_upload_url  = generate_upload_url
         self._upload_url_generator = upload_url_generator
+        self._set_camera_source    = set_camera_source
 
         # Registrar rutas
         router.post("/modules/link")(self.link_module)
@@ -81,6 +89,7 @@ class RestHandler:
         router.delete("/alerts/{alert_id}")(self.delete_alert)
         router.delete("/alerts")(self.delete_all_alerts)
         router.patch("/modules/{module_id}/name")(self.rename_module)
+        router.patch("/modules/{module_id}/camera")(self.set_camera_source)
 
     async def link_module(
         self,
@@ -140,7 +149,38 @@ class RestHandler:
             cameras=      [CameraInfoSchema(id=c.id, name=c.name) for c in module.cameras],
             user_id=      module.user_id,
             display_name= module.display_name,
+            camera_ok=            module.camera_ok,
+            camera_status_at=     module.camera_status_at.isoformat() if module.camera_status_at else None,
+            camera_status_reason= module.camera_status_reason,
+            camera_url=           module.camera_url,
         )
+
+    async def set_camera_source(
+        self,
+        module_id: str,
+        body:      SetCameraSourceSchema,
+        token:     dict = Depends(verify_token),
+    ) -> dict:
+        """
+        Configura la fuente de video del módulo y se la empuja si está conectado.
+        La validación del esquema de la URL ocurre en el caso de uso.
+        """
+        try:
+            await self._set_camera_source.execute(SetCameraSourceCommand(
+                module_id= module_id,
+                user_id=   token["uid"],
+                url=       body.url,
+            ))
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except PermissionError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        except ValueError as e:
+            # URL inválida: esquema no permitido o credenciales embebidas.
+            # El mensaje está redactado para mostrárselo al usuario.
+            raise HTTPException(status_code=400, detail=str(e))
+
+        return {"message": "Cámara actualizada"}
 
     async def rename_module(
         self,

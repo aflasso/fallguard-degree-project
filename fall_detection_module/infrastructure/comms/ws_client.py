@@ -38,16 +38,18 @@ class WebSocketClient(AlertSender):
         server_url:  str,
         module_id:   str,
         cameras:     list,
-        on_set_camera:     Optional[Callable[[int], None]]  = None,
-        on_config_update:  Optional[Callable[[dict], None]] = None,
-        on_link_status:    Optional[Callable[[bool], None]] = None,
+        on_set_camera:        Optional[Callable[[int], None]]  = None,
+        on_config_update:     Optional[Callable[[dict], None]] = None,
+        on_link_status:       Optional[Callable[[bool], None]] = None,
+        on_set_camera_source: Optional[Callable[[str], None]]  = None,
     ):
-        self._server_url       = server_url
-        self._module_id        = module_id
-        self._cameras          = cameras
-        self._on_set_camera    = on_set_camera
-        self._on_config_update = on_config_update
-        self._on_link_status   = on_link_status
+        self._server_url          = server_url
+        self._module_id           = module_id
+        self._cameras             = cameras
+        self._on_set_camera       = on_set_camera
+        self._on_config_update    = on_config_update
+        self._on_link_status      = on_link_status
+        self._on_set_camera_source = on_set_camera_source
 
         self._ws:              Optional[websocket.WebSocketApp] = None
         self._connected:       bool      = False
@@ -55,6 +57,12 @@ class WebSocketClient(AlertSender):
         self._backoff:         float     = 1.0
         self._stop_event       = threading.Event()
         self._pending_uploads: dict      = {}   # {clip_id: (Event, result_dict)}
+
+        # Último estado de cámara conocido. Se re-afirma en cada reconexión:
+        # si la cámara cayó estando el WebSocket caído, el servidor se entera
+        # al reconectar en vez de quedarse con un estado obsoleto.
+        self._camera_ok:     bool = True
+        self._camera_reason: str  = ""
 
     # ── Puerto ────────────────────────────────────────────────────────────
 
@@ -86,6 +94,39 @@ class WebSocketClient(AlertSender):
 
     def is_connected(self) -> bool:
         return self._connected
+
+    # ── Estado de cámara ──────────────────────────────────────────────────
+
+    def send_camera_status(self, camera_ok: bool, reason: str = "") -> bool:
+        """
+        Informa al servidor si la cámara está entregando frames.
+        Sin esto el heartbeat sigue diciendo que el módulo está sano mientras
+        en realidad está ciego, y la app no tiene forma de saberlo.
+
+        Retorna True si se envió; False si no hay conexión. El estado se guarda
+        igual y se re-afirma al reconectar, así que un False no lo pierde.
+        """
+        self._camera_ok     = camera_ok
+        self._camera_reason = reason
+        return self._send_camera_status()
+
+    def _send_camera_status(self) -> bool:
+        if not self._connected or self._ws is None:
+            return False
+        try:
+            self._ws.send(json.dumps({
+                "type":      "camera_status",
+                "module_id": self._module_id,
+                "camera_ok": self._camera_ok,
+                "reason":    self._camera_reason,
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }))
+            logger.info(f"Estado de cámara reportado: camera_ok={self._camera_ok}")
+            return True
+        except Exception as e:
+            logger.error(f"Error reportando estado de cámara: {e}")
+            self._connected = False
+            return False
 
     def request_upload_url(self, clip_id: str, timeout: int = 30) -> tuple[str, str]:
         """
@@ -183,6 +224,11 @@ class WebSocketClient(AlertSender):
         }
         ws.send(json.dumps(message))
 
+        # Re-afirmar el estado de cámara: module_connect no lo transporta, y el
+        # servidor pudo quedarse con un valor viejo (o reiniciarse) mientras
+        # estábamos desconectados.
+        self._send_camera_status()
+
         # Llamar callback de reconexión en thread separado para no bloquear
         # Thread 3 — flush_pending usa request_upload_url que espera respuestas
         # WebSocket, y esas respuestas llegan por este mismo thread
@@ -220,6 +266,14 @@ class WebSocketClient(AlertSender):
                 if self._on_link_status:
                     self._on_link_status(False)
 
+            elif msg_type == "set_camera_source":
+                url = data.get("url")
+                logger.info(f"Servidor configura fuente de cámara: {url}")
+                if url and self._on_set_camera_source:
+                    self._on_set_camera_source(url)
+
+            # Vestigial: selección de cámara física por índice. La fuente hoy la
+            # define el usuario desde la app (set_camera_source).
             elif msg_type == "set_camera":
                 camera_id = data.get("camera_id")
                 logger.info(f"Servidor solicita cámara: {camera_id}")

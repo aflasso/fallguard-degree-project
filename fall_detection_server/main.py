@@ -23,6 +23,8 @@ from application.use_cases.handle_fall_alert import HandleFallAlert
 from application.use_cases.link_module import LinkModule
 from application.use_cases.unlink_module import UnlinkModule
 from application.use_cases.generate_upload_url import GenerateUploadUrl
+from application.use_cases.update_camera_status import UpdateCameraStatus
+from application.use_cases.set_camera_source import SetCameraSource
 from api.websocket import WebSocketHandler
 from api.rest import RestHandler, router
 
@@ -88,14 +90,22 @@ async def startup():
     disconnect_module = DisconnectModule(
     module_repository= module_repo,
 )
+    update_camera_status = UpdateCameraStatus(
+        module_repository= module_repo,
+    )
+    set_camera_source = SetCameraSource(
+        module_repository=  module_repo,
+        connection_manager= connection_manager,
+    )
 
     # ── WebSocket handler ─────────────────────────────────────────────────
     ws_handler = WebSocketHandler(
-        connection_manager=  connection_manager,
-        connect_module=      connect_module,
-        disconnect_module=   disconnect_module,
-        handle_fall_alert=   handle_fall_alert,
-        generate_upload_url= generate_upload_url,
+        connection_manager=   connection_manager,
+        connect_module=       connect_module,
+        disconnect_module=    disconnect_module,
+        handle_fall_alert=    handle_fall_alert,
+        generate_upload_url=  generate_upload_url,
+        update_camera_status= update_camera_status,
     )
 
     # ── REST handler ──────────────────────────────────────────────────────
@@ -108,6 +118,7 @@ async def startup():
         connection_manager=   connection_manager,
         generate_upload_url=  generate_upload_url,
         upload_url_generator= upload_url_generator,
+        set_camera_source=    set_camera_source,
     )
 
     app.include_router(router)

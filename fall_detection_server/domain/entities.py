@@ -34,6 +34,18 @@ class Module:
     cameras:      List[CameraInfo]      = field(default_factory=list)
     display_name: Optional[str]         = None
 
+    # Un módulo puede estar CONNECTED (WebSocket vivo, heartbeat llegando) y aun
+    # así estar ciego porque su cámara dejó de entregar frames. `status` no
+    # alcanza para distinguir esos dos casos.
+    camera_ok:            bool               = True
+    camera_status_at:     Optional[datetime] = None
+    camera_status_reason: Optional[str]      = None
+
+    # Fuente de video que el usuario eligió desde la app. El servidor la empuja
+    # al módulo al conectar y cada vez que cambia. `None` = sin configurar: el
+    # módulo espera sin detectar.
+    camera_url: Optional[str] = None
+
 
 @dataclass
 class User:

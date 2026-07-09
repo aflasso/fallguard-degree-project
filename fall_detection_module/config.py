@@ -8,7 +8,7 @@ import os
 import uuid
 from pathlib import Path
 from dotenv import load_dotenv
-from typing import Union
+from typing import Optional, Union
 
 load_dotenv()
 
@@ -44,15 +44,67 @@ def save_linked_state(linked: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("1" if linked else "0")
 
-# Fuente de video — índice de cámara o ruta a video
-CAMERA_SOURCE = os.getenv("CAMERA_SOURCE", "0")
+# ── Fuente de video ───────────────────────────────────────────────────────────
+# La fuente la elige el usuario desde la app y el servidor la empuja por
+# WebSocket. `CAMERA_SOURCE` es solo un valor de arranque para pruebas: en el
+# momento en que el módulo recibe una fuente del servidor deja de usarse.
+#
+# Prioridad: servidor (en vivo) > persistida en disco > CAMERA_SOURCE > sin fuente.
+#
+# Vacío significa "sin fuente": el módulo arranca y espera a que la app le
+# configure una, igual que espera a estar vinculado.
+CAMERA_SOURCE = os.getenv("CAMERA_SOURCE", "")
 
-def get_camera_source() -> Union[int, str]:
-    """Retorna int si es índice de cámara, str si es ruta de video."""
+CAMERA_SOURCE_PATH = os.getenv("CAMERA_SOURCE_PATH", "data/camera_source.txt")
+
+
+def _parse_source(raw: str) -> Optional[Union[int, str]]:
+    """int si es índice de cámara física, str si es URL o ruta, None si está vacío."""
+    raw = raw.strip()
+    if not raw:
+        return None
     try:
-        return int(CAMERA_SOURCE)
+        return int(raw)
     except ValueError:
-        return CAMERA_SOURCE
+        return raw
+
+
+def get_camera_source() -> Optional[Union[int, str]]:
+    """Fuente configurada por entorno (valor de arranque)."""
+    return _parse_source(CAMERA_SOURCE)
+
+
+def load_camera_source() -> Optional[str]:
+    """Última fuente enviada por el servidor, persistida en disco."""
+    path = Path(CAMERA_SOURCE_PATH)
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip() or None
+    return None
+
+
+def save_camera_source(url: str) -> None:
+    path = Path(CAMERA_SOURCE_PATH)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(url, encoding="utf-8")
+
+
+def resolve_camera_source() -> Optional[Union[int, str]]:
+    """
+    Fuente con la que arrancar. La persistida gana sobre el entorno: es la que
+    eligió el usuario en la app, y permite que un módulo ya configurado arranque
+    aunque no haya conexión. El servidor la re-afirma al conectar.
+    """
+    persisted = load_camera_source()
+    if persisted is not None:
+        return _parse_source(persisted)
+    return get_camera_source()
+
+
+# Timeouts del backend FFmpeg para streams de red (cámara IP). Solo aplican a
+# fuentes rtsp://, http://, etc. Sin ellos, una cámara congelada bloquea read()
+# indefinidamente en vez de devolver None, y el módulo nunca reconecta.
+CAMERA_OPEN_TIMEOUT_MS = int(os.getenv("CAMERA_OPEN_TIMEOUT_MS", "5000"))
+CAMERA_READ_TIMEOUT_MS = int(os.getenv("CAMERA_READ_TIMEOUT_MS", "5000"))
 
 
 # ── Servidor ──────────────────────────────────────────────────────────────────

@@ -36,12 +36,16 @@ class FirestoreModuleRepository(FirestoreRepository[Module], ModuleRepository):
 
     def _to_dict(self, entity: Module) -> dict:
         return {
-            "module_id":    entity.module_id,
-            "status":       entity.status.value,
-            "last_seen":    entity.last_seen,
-            "user_id":      entity.user_id,
-            "cameras":      [{"id": c.id, "name": c.name} for c in entity.cameras],
-            "display_name": entity.display_name,
+            "module_id":            entity.module_id,
+            "status":               entity.status.value,
+            "last_seen":            entity.last_seen,
+            "user_id":              entity.user_id,
+            "cameras":              [{"id": c.id, "name": c.name} for c in entity.cameras],
+            "display_name":         entity.display_name,
+            "camera_ok":            entity.camera_ok,
+            "camera_status_at":     entity.camera_status_at,
+            "camera_status_reason": entity.camera_status_reason,
+            "camera_url":           entity.camera_url,
         }
 
     def _from_dict(self, data: dict) -> Module:
@@ -55,4 +59,10 @@ class FirestoreModuleRepository(FirestoreRepository[Module], ModuleRepository):
             user_id=      data.get("user_id") or None,
             cameras=      [CameraInfo(id=c["id"], name=c["name"]) for c in data.get("cameras", [])],
             display_name= data.get("display_name"),
+            # Documentos anteriores a este campo no lo tienen: se asumen sanos.
+            # El módulo re-afirma su estado real al conectarse.
+            camera_ok=            data.get("camera_ok", True),
+            camera_status_at=     data.get("camera_status_at"),
+            camera_status_reason= data.get("camera_status_reason"),
+            camera_url=           data.get("camera_url") or None,
         )

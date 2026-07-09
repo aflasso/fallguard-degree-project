@@ -5,7 +5,7 @@ Implementa el puerto application/ports/camera.py
 
 import logging
 import time
-from typing import Callable, Optional, Union
+from typing import Callable, List, Optional, Union
 
 import cv2
 import numpy as np
@@ -26,40 +26,78 @@ class OpenCVCamera(Camera):
 
     Distingue archivo/cámara local de stream de red: en un stream, un fallo
     de lectura es un corte temporal recuperable (se reconecta), no el fin.
+
+    En streams se imponen timeouts de apertura y lectura al backend FFmpeg.
+    Sin ellos una cámara IP congelada (celular en suspensión, Wi-Fi en ahorro
+    de energía) deja el socket TCP abierto y read() bloquea para siempre: el
+    módulo queda ciego sin devolver None y sin poder reconectar.
     """
 
     RECONNECT_MAX_BACKOFF = 10.0   # segundos máximo entre reintentos
 
-    def __init__(self, source: Union[int, str]):
+    def __init__(
+        self,
+        source: Union[int, str],
+        open_timeout_ms: int = 5000,
+        read_timeout_ms: int = 5000,
+    ):
         self._source = source
+        self._open_timeout_ms = open_timeout_ms
+        self._read_timeout_ms = read_timeout_ms
         self._is_stream = (
             isinstance(source, str) and source.lower().startswith(_STREAM_SCHEMES)
         )
-        self._cap = cv2.VideoCapture(source)
+        self._last_frame_ts = time.monotonic()
+        self._cap = self._open()
 
         if not self._cap.isOpened():
             raise RuntimeError(f"No se pudo abrir fuente: {source}")
 
-        if self._is_stream:
-            self._apply_stream_opts()
-
         logger.info(f"OpenCVCamera iniciada | source={source} | stream={self._is_stream}")
 
-    def _apply_stream_opts(self) -> None:
+    def _open(self) -> cv2.VideoCapture:
+        """
+        Abre la fuente. Los timeouts solo aplican a streams: son propiedades del
+        backend FFmpeg y una webcam local usa otro backend.
+        """
+        if not self._is_stream:
+            return cv2.VideoCapture(self._source)
+
+        params: List[int] = [
+            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, self._open_timeout_ms,
+            cv2.CAP_PROP_READ_TIMEOUT_MSEC, self._read_timeout_ms,
+        ]
+        cap = cv2.VideoCapture(self._source, cv2.CAP_FFMPEG, params)
+        if cap.isOpened():
+            self._apply_stream_opts(cap)
+        return cap
+
+    def _apply_stream_opts(self, cap: cv2.VideoCapture) -> None:
         # Buffer mínimo: ante un hipo de red, descartar el atraso en vez de
         # acumular latencia. Algunos backends lo ignoran, por eso el try.
         try:
-            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         except Exception:
             pass
+
+    @property
+    def source(self) -> Union[int, str]:
+        return self._source
 
     @property
     def is_stream(self) -> bool:
         return self._is_stream
 
+    def seconds_since_last_frame(self) -> float:
+        """Segundos transcurridos desde el último frame leído con éxito."""
+        return time.monotonic() - self._last_frame_ts
+
     def read(self) -> Optional[np.ndarray]:
         ret, frame = self._cap.read()
-        return frame if ret else None
+        if not ret:
+            return None
+        self._last_frame_ts = time.monotonic()
+        return frame
 
     def reconnect(self, should_continue: Callable[[], bool]) -> bool:
         """
@@ -76,11 +114,11 @@ class OpenCVCamera(Camera):
         backoff = 1.0
         while should_continue():
             logger.info(f"Reintentando abrir stream: {self._source}")
-            self._cap = cv2.VideoCapture(self._source)
+            self._cap = self._open()
             if self._cap.isOpened():
-                self._apply_stream_opts()
                 ret, _ = self._cap.read()   # frame de prueba
                 if ret:
+                    self._last_frame_ts = time.monotonic()
                     logger.info("Stream reconectado")
                     return True
                 self._cap.release()

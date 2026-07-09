@@ -33,6 +33,9 @@ class MockClipRecorder(ClipRecorder):
     def is_recording(self) -> bool:
         return self._recording
 
+    def abort(self, reason: str) -> None:
+        self._recording = False
+
 
 class MockClipStorage(ClipStorage):
     def __init__(self, should_fail: bool = False):

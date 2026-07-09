@@ -31,6 +31,11 @@ class Camera(ABC):
         ...
 
     @abstractmethod
+    def seconds_since_last_frame(self) -> float:
+        """Segundos transcurridos desde el último frame leído con éxito."""
+        ...
+
+    @abstractmethod
     def reconnect(self, should_continue: Callable[[], bool]) -> bool:
         """
         Reabre un stream tras un corte, con reintentos hasta reconectar o

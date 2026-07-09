@@ -25,6 +25,14 @@ class HeartbeatSchema(BaseModel):
     timestamp: str
 
 
+class CameraStatusSchema(BaseModel):
+    type:      str
+    module_id: str
+    camera_ok: bool
+    reason:    str = ""
+    timestamp: Optional[str] = None
+
+
 class SetCameraSchema(BaseModel):
     camera_id: int
 
@@ -46,7 +54,16 @@ class ModuleStatusSchema(BaseModel):
     cameras:      List[CameraInfoSchema] = []
     user_id:      Optional[str] = None
     display_name: Optional[str] = None
+    camera_ok:            bool          = True
+    camera_status_at:     Optional[str] = None
+    camera_status_reason: Optional[str] = None
+    camera_url:           Optional[str] = None
 
 
 class RenameModuleSchema(BaseModel):
     display_name: str
+
+
+class SetCameraSourceSchema(BaseModel):
+    """La validación del esquema de la URL vive en domain/camera_source.py."""
+    url: str
