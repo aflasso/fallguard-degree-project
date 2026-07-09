@@ -120,43 +120,39 @@ class AlertService {
 
   // ── Alertas ────────────────────────────────────────────────────────────────
 
-  static Future<List<AlertModel>> _fetchAlerts() async {
-    final res = await http.get(
-      Uri.parse('$_baseUrl/api/alerts?user_id=$_uid'),
-      headers: await _headers(),
-    );
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception('fetchAlerts failed: ${res.statusCode} ${res.body}');
-    }
-    final List<dynamic> raw = jsonDecode(res.body) as List<dynamic>;
-    return raw.map((json) {
-      final m = json as Map<String, dynamic>;
-      return AlertModel(
-        id: m['alert_id'] as String,
-        timestamp: DateTime.parse(m['timestamp'] as String),
-        status: AlertStatus.values.firstWhere(
-          (e) => e.name == (m['status'] as String? ?? 'detected'),
-          orElse: () => AlertStatus.detected,
-        ),
-        location: m['location'] as String? ?? '',
-        elderlyName: m['elderlyName'] as String? ?? '',
-        description: m['description'] as String? ?? '',
-      );
-    }).toList();
+  /// Alertas del usuario en tiempo real desde Firestore (igual que los módulos).
+  /// Antes se sondeaba por REST cada 30s, lo que retrasaba la actualización del
+  /// estado en la pantalla principal; ahora refleja los cambios al instante.
+  static Stream<List<AlertModel>> alertsStream() {
+    return _db
+        .collection('alerts')
+        .where('user_id', isEqualTo: _uid)
+        .snapshots()
+        .map((snap) {
+      final list = snap.docs.map((d) {
+        final m = d.data();
+        return AlertModel(
+          id: m['alert_id'] as String? ?? d.id,
+          timestamp: _parseTimestamp(m['timestamp']),
+          status: AlertStatus.values.firstWhere(
+            (e) => e.name == (m['status'] as String? ?? 'detected'),
+            orElse: () => AlertStatus.detected,
+          ),
+          location: m['location'] as String? ?? '',
+          elderlyName: m['elderlyName'] as String? ?? '',
+          description: m['description'] as String? ?? '',
+        );
+      }).toList();
+      // Orden descendente por fecha (más reciente primero), como hacía el REST.
+      list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      return list;
+    });
   }
 
-  static final _refreshController = StreamController<void>.broadcast();
-
-  static void _triggerRefresh() => _refreshController.add(null);
-
-  static Stream<List<AlertModel>> alertsStream() async* {
-    while (true) {
-      yield await _fetchAlerts();
-      await Future.any([
-        Future.delayed(const Duration(seconds: 30)),
-        _refreshController.stream.first,
-      ]);
-    }
+  static DateTime _parseTimestamp(dynamic raw) {
+    if (raw is Timestamp) return raw.toDate();
+    if (raw is String) return DateTime.tryParse(raw) ?? DateTime.now();
+    return DateTime.now();
   }
 
   static Future<void> updateAlertStatus(
@@ -169,9 +165,7 @@ class AlertService {
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception(
           'updateAlertStatus failed: ${res.statusCode} ${res.body}');
-    }
-    _triggerRefresh();
-  }
+    }  }
 
   static Stream<AlertModel?> latestAlertStream() =>
       alertsStream().map((list) => list.isEmpty ? null : list.first);
@@ -195,9 +189,7 @@ class AlertService {
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception('deleteAlert failed: ${res.statusCode} ${res.body}');
-    }
-    _triggerRefresh();
-  }
+    }  }
 
   static Future<void> deleteAllAlerts() async {
     final res = await http.delete(
@@ -206,7 +198,5 @@ class AlertService {
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception('deleteAllAlerts failed: ${res.statusCode} ${res.body}');
-    }
-    _triggerRefresh();
-  }
+    }  }
 }
