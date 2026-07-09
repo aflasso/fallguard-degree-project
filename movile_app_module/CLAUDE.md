@@ -129,8 +129,26 @@ Un módulo sin `camera_url` muestra "Sin cámara configurada" en ámbar: sin cá
 
 - `MjpegView.canPreview(url)` → solo `http`/`https`. Una URL `rtsp://` se acepta como fuente pero muestra "sin vista previa disponible".
 - `ValueKey(url)` en el widget fuerza la reconexión al cambiar la URL.
-- Watchdog de 8 s: si no llega ningún frame, muestra el error en vez de un spinner eterno.
+- Watchdog de 8 s **solo para el primer frame**: si no llega ninguno, muestra el error en vez de un spinner eterno.
 - `Image.memory(gaplessPlayback: true)` — sin eso parpadea en negro entre frames.
+- `clientFactory` es inyectable. `TestWidgetsFlutterBinding` intercepta `HttpClient` y responde 400 sin salir a la red, así que **ningún widget test puede ejercitar el stream real**; hay que pasarle un cliente falso.
+
+### Reconexión ante microcortes
+
+Un MJPEG sobre HTTP se corta seguido (la app de la cámara cierra la conexión, el Wi-Fi hipa). El widget distingue dos casos:
+
+| Situación | Comportamiento |
+|---|---|
+| El stream termina **sin** haber dado un frame | Fallo (`onFailed`). No hay nada que verificar. |
+| El stream termina **después** de haber dado imagen | Reconecta con backoff (500 ms → 4 s), conserva el último frame en pantalla y muestra el aviso "Reconectando…". **No** dispara `onFailed`. |
+
+El aviso importa: sin él, un frame congelado se ve igual que uno en vivo.
+
+Y la verificación **se aferra**: una vez que `onLive` disparó, un corte posterior no vuelve el estado a `failed`. Haber visto la cámara es un hecho consumado; solo editar la URL lo invalida.
+
+### Ancho fijo de los diálogos
+
+`AlertDialog` mide su contenido con `IntrinsicWidth`, y un stream de video no tiene ancho natural. Por eso los diálogos envuelven su contenido en un `SizedBox(width: _dialogWidth)`, y `Image.memory` **no** lleva `width: double.infinity` — con él, el layout falla con `'input.isFinite': is not true`.
 
 **Limitaciones conocidas:**
 - La previsualización requiere que el **celular esté en la misma LAN que la cámara**. Es una comprobación del celular, no del módulo: la confirmación autoritativa llega cuando el módulo reporta `camera_ok` (ver `isCameraDown`).
