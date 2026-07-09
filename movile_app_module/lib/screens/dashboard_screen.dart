@@ -16,11 +16,18 @@ class DashboardScreen extends StatelessWidget {
 
   /// Estado del header según (en orden de prioridad):
   /// 1. alertas sin confirmar, 2. sin módulos vinculados,
-  /// 3. algún módulo vinculado desconectado, 4. todo en orden.
+  /// 3. algún módulo vinculado desconectado, 4. algún módulo conectado pero
+  /// con la cámara sin señal, 5. todo en orden.
+  ///
+  /// Desconectado va antes que cámara sin señal porque es el fallo más
+  /// ambiguo: no sabemos si el módulo sigue vivo detectando y encolando
+  /// alertas, o si está apagado. Con la cámara caída sabemos exactamente qué
+  /// pasa — el módulo vive y no ve.
   ({String label, Color accent, Color container, IconData icon}) _headerState({
     required int pendingAlerts,
     required bool hasModules,
     required bool anyDisconnected,
+    required bool anyCameraDown,
   }) {
     if (pendingAlerts > 0) {
       return (
@@ -46,6 +53,14 @@ class DashboardScreen extends StatelessWidget {
         accent: AppTheme.warning,
         container: AppTheme.warningLight,
         icon: Icons.wifi_off_rounded,
+      );
+    }
+    if (anyCameraDown) {
+      return (
+        label: 'Cámara sin señal',
+        accent: AppTheme.warning,
+        container: AppTheme.warningLight,
+        icon: Icons.videocam_off_rounded,
       );
     }
     return (
@@ -126,10 +141,12 @@ class DashboardScreen extends StatelessWidget {
     required List<AlertModel> pendingList,
     required bool hasModules,
     required List<Map<String, dynamic>> disconnected,
+    required List<Map<String, dynamic>> cameraDown,
   }) {
     if (pendingList.isNotEmpty) return _alertsPreviewCard(context, pendingList);
     if (!hasModules) return _noModulesCard(context);
     if (disconnected.isNotEmpty) return _disconnectedCard(disconnected);
+    if (cameraDown.isNotEmpty) return _cameraDownCard(cameraDown);
     return _safeCard();
   }
 
@@ -364,6 +381,117 @@ class DashboardScreen extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           ...disconnected.map(_disconnectedModuleRow),
+        ],
+      ),
+    );
+  }
+
+  // El módulo está online pero ciego: no va a detectar nada aunque la app
+  // lo muestre conectado.
+  Widget _cameraDownCard(List<Map<String, dynamic>> cameraDown) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: _cardDecoration(border: AppTheme.warningLight),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.videocam_off_rounded,
+                  color: AppTheme.warning, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  cameraDown.length == 1
+                      ? 'Cámara sin señal'
+                      : 'Cámaras sin señal',
+                  style: GoogleFonts.manrope(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'El módulo está conectado pero no recibe imagen. '
+            'No se detectarán caídas hasta que se restablezca.',
+            style: GoogleFonts.manrope(
+              fontSize: 12,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          ...cameraDown.map(_cameraDownModuleRow),
+        ],
+      ),
+    );
+  }
+
+  Widget _cameraDownModuleRow(Map<String, dynamic> data) {
+    final moduleId = data['module_id'] as String? ?? 'desconocido';
+    final displayName = data['display_name'] as String?;
+
+    final sinceRaw = data['camera_status_at'];
+    DateTime? since;
+    if (sinceRaw is Timestamp) {
+      since = sinceRaw.toDate();
+    } else if (sinceRaw is String) {
+      since = DateTime.tryParse(sinceRaw);
+    }
+    final String info;
+    if (since != null) {
+      final l = since.toLocal();
+      info =
+          'Sin imagen desde ${l.day}/${l.month}/${l.year} · ${l.hour}:${l.minute.toString().padLeft(2, '0')}';
+    } else {
+      info = 'Sin imagen';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppTheme.warningLight,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.videocam_off_outlined,
+                color: AppTheme.warning, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  displayName ?? moduleId,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.manrope(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  info,
+                  style: GoogleFonts.manrope(
+                    fontSize: 11,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -658,10 +786,13 @@ class DashboardScreen extends StatelessWidget {
                     final disconnected = modules
                         .where((m) => (m['status'] as String?) != 'connected')
                         .toList();
+                    final cameraDown =
+                        modules.where(AlertService.isCameraDown).toList();
                     final st = _headerState(
                       pendingAlerts: pendingList.length,
                       hasModules: hasModules,
                       anyDisconnected: disconnected.isNotEmpty,
+                      anyCameraDown: cameraDown.isNotEmpty,
                     );
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -673,6 +804,7 @@ class DashboardScreen extends StatelessWidget {
                           pendingList: pendingList,
                           hasModules: hasModules,
                           disconnected: disconnected,
+                          cameraDown: cameraDown,
                         ),
                       ],
                     );

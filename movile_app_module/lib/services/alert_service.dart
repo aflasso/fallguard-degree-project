@@ -95,6 +95,33 @@ class AlertService {
     }
   }
 
+  /// Configura la fuente de video del módulo. El servidor valida el esquema de
+  /// la URL y devuelve el motivo del rechazo en `detail`; se propaga tal cual
+  /// porque está redactado para mostrárselo al usuario.
+  static Future<void> setModuleCamera(String moduleId, String url) async {
+    final res = await http.patch(
+      Uri.parse('$_baseUrl/api/modules/$moduleId/camera'),
+      headers: await _headers(),
+      body: jsonEncode({'url': url}),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(_detail(res.body) ?? 'No se pudo guardar la cámara');
+    }
+  }
+
+  /// Extrae el campo `detail` de un error de FastAPI.
+  static String? _detail(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['detail'] is String) {
+        return decoded['detail'] as String;
+      }
+    } catch (_) {
+      // Cuerpo no-JSON: caemos al mensaje genérico del llamador.
+    }
+    return null;
+  }
+
   static Future<void> updateFcmToken(String token) async {
     final res = await http.patch(
       Uri.parse('$_baseUrl/api/users/$_uid/fcm-token'),
@@ -116,6 +143,18 @@ class AlertService {
         .where('user_id', isEqualTo: _uid)
         .snapshots()
         .map((snap) => snap.docs.map((d) => d.data()).toList());
+  }
+
+  /// True si el módulo está conectado pero su cámara dejó de entregar frames:
+  /// sigue online y no detecta nada.
+  ///
+  /// Solo aplica a módulos conectados — en uno desconectado `camera_ok` es el
+  /// último valor reportado y no dice nada del presente. Los documentos previos
+  /// a este campo no lo traen y se asumen sanos.
+  static bool isCameraDown(Map<String, dynamic> module) {
+    final connected = (module['status'] as String?) == 'connected';
+    final cameraOk = (module['camera_ok'] as bool?) ?? true;
+    return connected && !cameraOk;
   }
 
   // ── Alertas ────────────────────────────────────────────────────────────────
