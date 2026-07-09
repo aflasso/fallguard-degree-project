@@ -72,7 +72,7 @@ Toda la cableada ocurre en `main.py` → `startup()`. No hay service locator ni 
 
 | Entidad | Campos clave | Descripción |
 |---|---|---|
-| `Module` | `module_id`, `status`, `last_seen`, `user_id`, `cameras` | Módulo local de detección. `user_id` es `None` si no está vinculado. |
+| `Module` | `module_id`, `status`, `last_seen`, `user_id`, `cameras`, `display_name` | Módulo local de detección. `user_id` es `None` si no está vinculado. `display_name` es un nombre opcional que el usuario asigna desde la app. |
 | `User` | `user_id`, `email`, `fcm_token` | Usuario de la app móvil. `fcm_token` es necesario para recibir push. |
 | `Alert` | `alert_id`, `module_id`, `user_id`, `timestamp`, `confidence`, `clip_url`, `seen`, `status` | Evento de caída confirmado. |
 | `ModuleStatus` | `CONNECTED`, `DISCONNECTED` | Estado de conexión del módulo. |
@@ -171,6 +171,8 @@ El token se verifica con Firebase Auth. El `uid` del token debe coincidir con el
 | `POST` | `/api/auth/reset-password` | Genera link de restablecimiento de contraseña y lo retorna. Sin autenticación requerida. |
 
 > El módulo local solicita presigned URLs via WebSocket (`request_upload_url`), no via REST.
+
+> **Lecturas en tiempo real:** la app móvil lee **alertas y módulos directamente de Firestore** con listeners (`snapshots()`), no por polling REST — así el dashboard refleja cambios al instante (alerta nueva, módulo desconectado). Las **escrituras** siguen pasando por el servidor (crear alerta vía WebSocket del módulo; confirmar/descartar/borrar y vincular/desvincular vía REST). `GET /api/alerts` y `GET /api/modules/status` quedan disponibles pero no son la ruta principal de lectura en vivo. La autorización de esas lecturas la hacen las reglas de seguridad de Firestore (cada usuario solo ve sus propios documentos).
 
 ---
 
@@ -423,3 +425,6 @@ Las URLs tienen 15 min de vigencia. Si se generaran al momento de la alerta, exp
 
 **¿Por qué `AlertStatus` usa `DETECTED` y no `PENDING`?**
 Documentos antiguos en Firestore usaban `"pending"` — el repositorio normaliza ese valor a `"detected"` via `_normalize_status()` para mantener compatibilidad hacia atrás sin migración de datos.
+
+**¿Por qué se normaliza `user_id` vacío a `None` al leer el módulo?**
+`FirestoreModuleRepository._from_dict` hace `data.get("user_id") or None`. Si una edición manual en Firestore deja `user_id` como `""` (string vacío) en vez de borrarlo, `"" is not None` daría `True` y el módulo se consideraría vinculado (mandaría `connected: linked=true`, intentaría generar presigned URL con un `user_id` vacío). Normalizar a `None` mantiene consistente el chequeo `user_id is None` en todo el servidor (link, upload, `connected`).

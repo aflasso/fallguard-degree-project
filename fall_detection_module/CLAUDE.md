@@ -5,7 +5,7 @@
 Módulo local que corre en un PC en el hogar. Captura video desde una cámara, detecta caídas en tiempo real usando YOLO-pose + LSTM, graba clips del evento y los sube al servidor central via WebSocket.
 
 Sus responsabilidades son:
-- Capturar video desde cámara física o archivo (modo test)
+- Capturar video desde cámara física, archivo (modo test) o **stream de red** (cámara IP/RTSP)
 - **No detectar mientras el módulo no esté vinculado a un usuario** (el servidor es la fuente de verdad)
 - Extraer keypoints de pose con YOLO11x-pose (pretrained, sin fine-tuning)
 - Clasificar secuencias temporales con LSTM (Normal / Cayendo / Post-caída)
@@ -145,6 +145,23 @@ El estado se persiste en `data/linked_state.txt` (`1`/`0`). Al arrancar se resta
 
 ---
 
+## Fuentes de video y reconexión
+
+`config.get_camera_source()` decide el tipo de fuente: si `CAMERA_SOURCE` es un entero → cámara física (se escanean cámaras); si es string → archivo o URL de stream. `OpenCVCamera` distingue **archivo** de **stream de red** por el esquema de la URL (`rtsp://`, `rtmp://`, `http://`, `https://`, `udp://`, `tcp://`).
+
+| Fuente | `read()` devuelve `None` | Comportamiento |
+|---|---|---|
+| Archivo / cámara física | fin del video o fallo | detiene el módulo (`stop_event`) |
+| **Stream de red (cámara IP)** | corte temporal de red | **reconecta** con backoff exponencial (1s → máx 10s) sin matar el módulo; al reconectar resetea la ventana de detección |
+
+- En streams se aplica `CAP_PROP_BUFFERSIZE = 1` para descartar el atraso ante hipos y no acumular latencia.
+- `OpenCVCamera.reconnect(should_continue)` es **cooperativo con la cancelación**: el Thread 1 pasa `lambda: not stop_event.is_set()`, así un Ctrl+C/parada interrumpe la reconexión.
+- La latencia intrínseca de una cámara IP (red + codificación) es de cientos de ms y **constante**; solo crecería si la GPU no alcanzara los FPS del stream (no es el caso a 30 FPS).
+
+**Docker en Windows:** la webcam USB **no** es accesible desde el contenedor (Docker corre en una VM WSL2 sin paso de dispositivos USB). Para cámara en Docker usar una **URL RTSP/HTTP** (ej. el celular como cámara IP); para webcam local, correr el módulo **nativo**.
+
+---
+
 ## Protocolo WebSocket
 
 ### Módulo → Servidor
@@ -207,7 +224,7 @@ Variables de entorno (ver `.env.template`):
 | `CLIPS_DIR` | `data/clips` | Directorio local de clips grabados |
 | `CONTEXT_BEFORE` | `75` | Frames antes de la caída (~3s a 25fps) |
 | `CONTEXT_AFTER` | `50` | Frames después de la caída (~2s a 25fps) |
-| `CAMERA_SOURCE` | `0` | Índice de cámara o ruta a video (modo test) |
+| `CAMERA_SOURCE` | `0` | Índice de cámara física, ruta a video (modo test) o URL de stream (`rtsp://`, `http://`) |
 | `LOCAL_QUEUE_PATH` | `data/pending_alerts.json` | Cola local persistida en disco |
 | `LOG_LEVEL` | `INFO` | Nivel de logging |
 
@@ -335,7 +352,7 @@ fall_detection_module/
 │   │   ├── yolo_pose.py             ← YoloPoseExtractor (implementa KeypointExtractor)
 │   │   └── lstm_model.py            ← LSTMFallPredictor (implementa FallPredictor)
 │   ├── video/
-│   │   ├── opencv_camera.py         ← OpenCVCamera (captura de frames)
+│   │   ├── opencv_camera.py         ← OpenCVCamera (captura; stream vs archivo + reconexión)
 │   │   ├── opencv_clip_recorder.py  ← OpenCVClipRecorder (buffer circular + grabación)
 │   │   ├── opencv_camera_scanner.py ← escanea cámaras físicas disponibles
 │   │   └── active_camera.py         ← ActiveCamera (cámara activa intercambiable)
@@ -372,6 +389,9 @@ Listar paquetes manualmente en el Dockerfile puede resolver versiones distintas 
 
 **¿Por qué solo se bloquea el Thread 1 con `linked_event` y no todos los threads?**
 El Thread 3 (WebSocket) debe seguir corriendo para recibir el mensaje que indica que el módulo fue vinculado — bloquearlo causaría un deadlock (nunca se enteraría). El Thread 2 (uploader) corre ocioso porque sin detección no llegan clips. Solo la detección (cara, con YOLO+LSTM) se pausa.
+
+**¿Por qué un stream se reconecta y un archivo no?**
+Para un archivo, `read()` que devuelve `None` es el fin del video → detener es correcto. Para una cámara IP, `None` suele ser un corte temporal de red; matar el módulo por un microcorte de Wi-Fi sería frágil. Por eso `OpenCVCamera` distingue la fuente y, en streams, reintenta reconectar en vez de terminar.
 
 **¿Por qué el estado de vinculación no se limpia al desconectarse?**
 Un módulo ya vinculado que pierde conexión debe seguir detectando y encolar alertas offline. Si se limpiara al desconectar, una caída de red apagaría la detección. El estado solo cambia cuando el servidor lo dice explícitamente (`connected` / `module_linked` / `module_unlinked`), y se persiste en disco para sobrevivir reinicios offline.
